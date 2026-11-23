@@ -10,7 +10,6 @@
 use rush_core::agent::Agent;
 use rush_core::text::Color;
 
-pub use crate::rooms::ROOM_KEY_PREFIX;
 use crate::style::*;
 pub use rush_room::handle::{WIDTH, kebab, plain, stored, stored_id, trim};
 
@@ -28,9 +27,9 @@ pub fn host_id(a: &Agent) -> Option<&str> {
     a.rush.then_some(a.job.id.as_str())
 }
 
-/// The session id a mention of a keeps, when rush runs it (not a room).
-fn kept_id<'a>(a: &'a Agent, host_id: Option<&'a str>) -> Option<&'a str> {
-    host_id.filter(|id| !id.is_empty() && !a.key.starts_with(ROOM_KEY_PREFIX))
+/// The session id a mention of a keeps, when rush runs it.
+fn kept_id(host_id: Option<&str>) -> Option<&str> {
+    host_id.filter(|id| !id.is_empty())
 }
 
 /// An agent's handle, how it's tagged and drawn, without its @: its
@@ -39,7 +38,7 @@ fn kept_id<'a>(a: &'a Agent, host_id: Option<&'a str>) -> Option<&'a str> {
 /// shares its title (mentionName).
 pub fn mention_name(a: &Agent, host_id: Option<&str>) -> String {
     let title = one_line(&a.display_name);
-    if let Some(id) = kept_id(a, host_id) {
+    if let Some(id) = kept_id(host_id) {
         return rush_room::handle::known().name(id, &title);
     }
     let k = kebab(&title);
@@ -56,7 +55,7 @@ pub fn mention_name(a: &Agent, host_id: Option<&str>) -> String {
 /// What an agent's colour is worked out from: what a mention of it
 /// keeps, so it keeps its colour when its title changes.
 pub fn handle_key(a: &Agent) -> String {
-    match kept_id(a, host_id(a)) {
+    match kept_id(host_id(a)) {
         Some(id) => stored(id),
         None => format!("@{}", mention_name(a, None)),
     }
@@ -76,7 +75,7 @@ pub fn tags(a: &Agent, host_id: Option<&str>, tag: &str) -> bool {
     if t.is_empty() {
         return false;
     }
-    if let Some(id) = kept_id(a, host_id)
+    if let Some(id) = kept_id(host_id)
         && (stored_id(t) == Some(id)
             || rush_room::handle::legacy_name(id).eq_ignore_ascii_case(t)
             || rush_room::handle::known().id_of(t).as_deref() == Some(id))

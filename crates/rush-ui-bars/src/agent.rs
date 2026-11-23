@@ -75,15 +75,12 @@ pub struct Of<'a> {
     pub saved_cwd: &'a str,
     /// The pointer is over its agent label.
     pub hover_label: bool,
-    /// How a room stands, said where an agent's connection is (roomConn):
-    /// Some for a room's row.
-    pub room: Option<Line>,
 }
 
 impl<'a> Of<'a> {
     /// Agent key's header, as known now; None when it's gone.
     pub fn read(m: &'a Model, key: &str) -> Option<Of<'a>> {
-        let a = crate::rooms::row_agent(m, key)?;
+        let a = crate::sess::agent(m, key)?;
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = crate::sess::peek_conn(m, key);
         // Only the project's files: not its memory or plans (bars.go:257,268).
@@ -114,10 +111,6 @@ impl<'a> Of<'a> {
                 .kept
                 .peek::<State>()
                 .is_some_and(|s| s.hover_label == key && !key.is_empty()),
-            room: key
-                .starts_with(crate::rooms::ROOM_KEY_PREFIX)
-                .then(|| m.room_of(key).map(rush_ui_social::rooms::room_conn))
-                .flatten(),
         })
     }
 
@@ -582,9 +575,6 @@ fn conn_words(o: &Of) -> Line {
     if o.hosted || o.sleeping {
         return Line::new();
     }
-    if let Some(r) = &o.room {
-        return r.clone();
-    }
     let a = o.a;
     if a.rush && !a.successor().is_empty() {
         return one(dim("retired · its successor carries on")); // Emeritus
@@ -879,7 +869,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = crate::sess::open_key(m) else {
         return;
     };
-    if rows.len() <= META_ROW || crate::rooms::row_agent(m, &key).is_none() {
+    if rows.len() <= META_ROW || crate::sess::agent(m, &key).is_none() {
         return; // gone: the Session says so
     }
     let hw = w.saturating_sub(3);

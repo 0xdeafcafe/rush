@@ -1,7 +1,7 @@
 //! The rush binary: the TUI, `--dump` and `--render`, the host's commands
 //! (`host`, `attach`, `view`/`views`, `inbox`, `reload`, `mcp-tools`,
 //! `spawn`), `menubar`, `pr`, `watch`, `plugind`, `plugin`, `statusline`,
-//! `gate`, `memory`, `room`, `feed`, `events`, `serve`, `remote`, `session`
+//! `gate`, `memory`, `feed`, `events`, `serve`, `remote`, `session`
 //! (and `session --on`), `push-later` and a plugin's own commands.
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478), `open` (session.go:795 openHosted), #reload's restart (:290-300)
@@ -17,7 +17,6 @@ mod install;
 mod memory;
 mod monitor;
 mod pushlater;
-mod room;
 mod serve;
 mod session;
 mod spawn;
@@ -73,8 +72,6 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
   rush contact-sheet <image>…
                    many images on one captioned WebP, for an agent to look over at once
-  rush room        a group chat of fresh agents arguing a topic to a verdict
-                    (\"rush room help\")
   rush session     start, send to, stop and list rush-mode sessions without
                     the view (\"rush session help\" for the commands)
   rush open <id> --hosted
@@ -240,15 +237,6 @@ fn run(args: &[String]) -> i32 {
         Some("events") => {
             let log = rush_events::path();
             return rush_events::events_cmd(&log, &args[1..], now(), &mut stdout, &mut stderr);
-        }
-        Some("room" | "rooms") => {
-            return rush_room::room_cmd(
-                &room::ctx(),
-                &args[1..],
-                &mut stdin,
-                &mut stdout,
-                &mut stderr,
-            );
         }
         // What a session's stand-in for an agent's program runs: not
         // meant to be run by hand.

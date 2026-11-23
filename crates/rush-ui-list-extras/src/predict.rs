@@ -278,8 +278,8 @@ pub fn moved(m: &mut Model, d: isize) {
         .lines
         .iter()
         .filter_map(|l| match l {
-            ListLine::Section { .. } | ListLine::Room { .. } => Some(None),
-            ListLine::Agent(i) | ListLine::Member { i, .. } => Some(Some(*i)),
+            ListLine::Section { .. } => Some(None),
+            ListLine::Agent(i) => Some(Some(*i)),
             _ => None,
         })
         .collect();

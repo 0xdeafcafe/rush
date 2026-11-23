@@ -10,7 +10,7 @@ use rush_ui_social::feed::ModelFeed;
 #[test]
 fn commands() {
     let m = feed_model();
-    for name in ["feed", "room", "broadcast", "update", "reload"] {
+    for name in ["feed", "update", "reload"] {
         assert!(
             m.ext.commands.iter().any(|c| c.name == name),
             "#{name} isn't registered"

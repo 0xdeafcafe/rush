@@ -3,7 +3,7 @@
 //! Rust-only), Claude's questions, a decisions
 //! block as a card, /rewind, /fork, /compact, #slim, the export sheet,
 //! the message sheet, enter's first-time question, the quick ask, /btw,
-//! the sidekick's notes, rooms on a session, mentions,
+//! the sidekick's notes, mentions,
 //! a stop with a message, handing a session to another harness,
 //! and the message box's pastes and pictures.
 //!
@@ -16,7 +16,7 @@
 //! compactsheet.go, slimsheet.go, entersheet.go, messagesheet.go,
 //! pastes.go, imagerefs.go, clipimage.go, mention.go,
 //! handoff.go, handoff_ready.go, stopnote.go, quickask.go, btwpanel.go,
-//! sidekick.go, discuss.go.
+//! sidekick.go.
 //!
 //! A hosted session (its client, its message box) is the session group's
 //! (session_core). The cards reach it through a [`Host`]: what the
@@ -41,7 +41,6 @@ pub mod claudescreen;
 pub mod clipimage;
 pub mod clock;
 pub mod compact;
-pub mod discuss;
 pub mod enter;
 pub mod finishcard;
 pub mod fork;
@@ -81,8 +80,8 @@ use rush_draw::MouseKind;
 // The base's modules, so crate::frame::.. and the like read as they did
 // in rush-ui. Each is the one module, not a copy.
 use rush_ui_base::{
-    accounts, attached, config, finish, frame, host, keybind, list, model, paint, rooms, sess,
-    session, startdir, style, worker,
+    accounts, attached, config, frame, host, keybind, list, model, paint, sess, session, startdir,
+    style, worker,
 };
 
 // Every test runs in a throwaway home (rush-testenv).
@@ -91,7 +90,6 @@ rush_testenv::sandboxed!();
 
 use crate::frame::{Ext, Mouse, Out};
 use crate::model::Model;
-use crate::style::*;
 
 pub use card::CardBtn;
 
@@ -302,9 +300,6 @@ pub enum Act {
     /// Starts a new session on harness `to`, named name, opened with this
     /// one's conversation so far (handoffTo's Cmd).
     Handoff { to: String, name: String },
-    /// Opens a room's set-up on the chat (#discuss, #intervene): the
-    /// room screens' sheet (roomSetup), filled from the ask.
-    Room(Box<discuss::RoomAsk>),
     /// Puts text into the box at the cursor as one paste, its chip and a
     /// space after it (pastes.add, insert).
     Paste(String),
@@ -617,18 +612,6 @@ pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
 }
 
-/// The chat the box's # commands go to: the one open, else the one shown
-/// beside the list on the row picked (Go's m.host, which syncHost
-/// keeps on the pane's chat, rushmode.go:2003; keys.go:936-952).
-pub fn chat_key(m: &Model) -> Option<String> {
-    open_key(m).or_else(|| {
-        m.pane
-            .as_ref()
-            .filter(|v| v.key == m.sel)
-            .map(|v| v.key.clone())
-    })
-}
-
 /// The conversation of agent key, open or beside the list.
 pub fn chat<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
     session(m, key).or_else(|| m.pane.as_ref().filter(|v| v.key == key).map(|v| &v.sess))
@@ -670,7 +653,6 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(remember::remember_key_hook);
     x.session_keys.push(remember::memory_wide_key_hook);
     x.session_keys.push(stopnote::stop_note_hook);
-    x.session_keys.push(discuss::verdict_key_hook);
     x.mouse.push(quickask::quick_mouse);
     x.mouse.push(btw::btw_mouse);
     x.mouse.push(mouse);
@@ -725,38 +707,15 @@ pub fn register(x: &mut Ext) {
             }
         },
     );
-    x.command(
-        "discuss",
-        "a room on this chat: agents argue it, and the verdict comes back here",
-        // In a Session, a room on its chat; anywhere else, as #room
-        // (keys.go:935).
-        |m, arg| match chat_key(m) {
-            Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
-                discuss::discuss(m, &k, arg, false)
-            }
-            _ => rush_ui_social::roomsetup::open_room_cmd(m, arg),
-        },
-    );
-    x.command(
-        "intervene",
-        "a room goes through this chat and tells its agent what to do next",
-        discuss::intervene_cmd,
-    );
 }
 
-/// A keymap action of the cards' (the chords ctrl+] q, i, z, t reach
+/// A keymap action of the cards' (the chords ctrl+] q, i, z reach
 /// them here, keybind.go:188-211); Pass for one that isn't.
 pub fn run_action(m: &mut Model, id: &str) -> Out {
     match id {
         "quick.ask" => quickask::toggle_quick(m),
         "session.quickask.insert" => quickask::insert_quick(m),
         "session.recall" => sidekick::toggle_recall(m),
-        // Not on a room: it is the discussion (keybind.go:189).
-        "session.discuss" => match open_key(m) {
-            Some(k) if k.starts_with(mention::ROOM_KEY_PREFIX) => Out::Idle,
-            Some(k) => discuss::discuss(m, &k, "", false),
-            None => Out::Pass,
-        },
         _ => Out::Pass,
     }
 }
@@ -815,45 +774,24 @@ pub fn slash(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
 }
 
 /// What the cards put in the open Session's dock, w wide (the dock's
-/// own width): a room running on the chat, and the card waiting on you
-/// (paneDock's chatRoomRows and cards, rushmode.go:3513, :3412). The
-/// dock sets them in its blocks, the card last above the box, and in a
-/// conversation they scroll with it (card_at says where it went).
-pub fn dock_parts(m: &mut Model, w: usize) -> (Vec<Line>, Vec<Line>) {
+/// own width): the card waiting on you (paneDock's cards,
+/// rushmode.go:3412). The dock sets it in its blocks, last above the
+/// box, and in a conversation it scrolls with it (card_at says where it
+/// went).
+pub fn dock_card_rows(m: &mut Model, w: usize) -> Vec<Line> {
     let Some(key) = open_key(m) else {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     };
     hold::sync(m, &key);
     question::sync_decisions_shown(m, &key);
     let Some(inf) = card_info(m, &key) else {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     };
     // Three fifths of the Session's rows, not the screen's: the box and
     // its keys stay under it (paneDock's h*3/5, h the pane's).
     let pane_h = if m.session_h > 0 { m.session_h } else { m.h };
     let max_h = pane_h * 3 / 5;
-    let room = discuss::chat_room_rows(m, &key, w);
-    let mut rows = question::card_rows(m, &key, &inf, w, max_h);
-    if rows.is_empty() {
-        // A room's verdict waits like a card: last, behind any other.
-        let v = discuss::verdict_rows(m, &key, w.saturating_sub(1));
-        if !v.is_empty() {
-            let edge = if conn(m, &key).card_focus {
-                ORANGE
-            } else {
-                BLUE
-            };
-            rows = v
-                .into_iter()
-                .map(|r| {
-                    let mut l = line([sp("▌", edge)]);
-                    join(&mut l, r);
-                    on_ground(fit(l, w), w, CHROME_BG)
-                })
-                .collect();
-        }
-    }
-    (room, rows)
+    question::card_rows(m, &key, &inf, w, max_h)
 }
 
 /// Where the open Session's card was set: its first row among the

@@ -23,7 +23,7 @@ pub mod top;
 // in rush-ui. Each is the one module, not a copy.
 use rush_ui_base::{
     accounts, agentry, away, frame, header, host, landing, list, listcache, look, mention, meters,
-    model, plan, rooms, sess, session, style,
+    model, plan, sess, session, style,
 };
 
 // Every test runs in a throwaway home (rush-testenv).

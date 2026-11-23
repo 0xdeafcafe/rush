@@ -268,7 +268,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = open_key(m) else {
         return;
     };
-    if rows.len() < HEAD_H || crate::rooms::row_agent(m, &key).is_none() {
+    if rows.len() < HEAD_H || crate::sess::agent(m, &key).is_none() {
         return; // gone: the frame says so
     }
     let hw = w.saturating_sub(3);
@@ -392,7 +392,7 @@ pub fn head_last(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = open_key(m) else {
         return;
     };
-    if rows.len() < HEAD_H || crate::rooms::row_agent(m, &key).is_none() {
+    if rows.len() < HEAD_H || crate::sess::agent(m, &key).is_none() {
         return;
     }
     let crumb = super::subpane::child_crumb(m, rows, w).unwrap_or_default();
@@ -649,12 +649,8 @@ fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
 /// in sight, the row picked among them.
 pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     let key = open_key(m)?;
-    crate::rooms::row_agent(m, &key)?;
+    crate::sess::agent(m, &key)?;
     let name = view_name(m, &key);
-    // A room's conversation is its log, drawn as the room's own.
-    if name == "conversation" && m.agents.iter().all(|a| a.key != key) {
-        return None;
-    }
     conn(m, &key).vs.rows = rows;
     if name != "conversation" {
         conn(m, &key).vs.menu = None;

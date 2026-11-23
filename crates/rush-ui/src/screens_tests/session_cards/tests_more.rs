@@ -1,6 +1,6 @@
 //! The sheets' and panels' behaviour, after Go's internal/ui tests
 //! (mention_test.go, quickask_test.go,
-//! sidekick_test.go, discuss_test.go, rewind_test.go,
+//! sidekick_test.go, rewind_test.go,
 //! compactsheet_test.go, messagesheet_test.go, handoff_ready_test.go)
 //! and the keys each sheet answers, as tables. No sleeps: a model with
 //! no loop runs handed-off work at once.
@@ -12,7 +12,6 @@ use std::time::Duration;
 use rush_core::agent::Agent;
 
 use super::btw::{Btws, Qa};
-use super::discuss::{chat_turns, ctx_words};
 use super::fork::{cut_after, worktree_name};
 use super::handoff::{await_carried, handoff_quiet};
 use super::mention::*;
@@ -303,45 +302,6 @@ fn recall_reads_its_notes() {
     let mut m = hosted(120, 40);
     run_action(&mut m, "session.recall");
     assert!(m.kept::<super::sidekick::Sidekick>().on);
-}
-
-/// ctxWords, and a chat's exchanges as a member reads them (discuss.go).
-#[test]
-fn discuss_reads_the_chat() {
-    assert_eq!(ctx_words(0, 0), "the chat has nothing to give yet");
-    assert_eq!(ctx_words(0, 4), "the topic alone");
-    assert_eq!(ctx_words(1, 4), "the latest exchange of the chat");
-    assert_eq!(ctx_words(3, 4), "the latest 3 of the chat's 4 exchanges");
-    let mut m = hosted(120, 40);
-    say(&mut m, "why is it slow");
-    let s = &m.session.as_ref().unwrap().sess;
-    let turns = chat_turns(s, false);
-    assert_eq!(turns, vec!["User: why is it slow\n".to_string()]);
-    // #discuss asks the room screens for a set-up on the chat.
-    super::discuss::discuss(&mut m, "k", "", false);
-    match acts(&mut m).pop() {
-        Some(Act::Room(r)) => {
-            assert_eq!(
-                (r.topic.as_str(), r.ctx, r.fill),
-                ("why is it slow", 1, false)
-            );
-        }
-        a => panic!("no room: {a:?}"),
-    }
-}
-
-/// ctrl+] t sets a room up on a chat, never on a room: a room is the
-/// discussion (keybind.go:189).
-#[test]
-fn discuss_key_on_a_chat_not_a_room() {
-    let mut m = hosted(120, 40);
-    say(&mut m, "why is it slow");
-    run_action(&mut m, "session.discuss");
-    assert!(matches!(acts(&mut m).pop(), Some(Act::Room(_))));
-    m.kept::<super::tests::Fake>().acts.clear();
-    m.session.as_mut().unwrap().key = format!("{ROOM_KEY_PREFIX}r1");
-    assert_eq!(run_action(&mut m, "session.discuss"), Out::Idle);
-    assert!(acts(&mut m).is_empty() && m.sheet.is_none());
 }
 
 /// Where each of your messages starts in a transcript, and where a turn
@@ -739,47 +699,6 @@ fn handoff_ready() {
     );
 }
 
-/// A verdict waiting on the chat: e puts it in the box, esc drops it,
-/// enter sends it (discuss.go:272).
-#[test]
-fn verdict_keys() {
-    for (k, want_input, want_act) in [
-        ("e", "The room's verdict on which cache:\nuse redis", None),
-        ("esc", "", None),
-        (
-            "enter",
-            "",
-            Some(Act::Send(
-                "The room's verdict on which cache:\nuse redis".into(),
-            )),
-        ),
-    ] {
-        let mut m = hosted(120, 40);
-        super::discuss::verdicts_back(
-            &mut m,
-            vec![rush_room::room::Summary {
-                room: rush_room::room::Room {
-                    id: "r".into(),
-                    from: "k".into(),
-                    topic: "which cache".into(),
-                    ..Default::default()
-                },
-                verdict: true,
-                final_: "use redis".into(),
-                ..Default::default()
-            }],
-        );
-        assert!(text(&m.frame()).contains("⇶ the room on this chat has a verdict"));
-        press(&mut m, k);
-        assert_eq!(m.kept::<Fake>().info["k"].input, want_input, "{k}");
-        assert_eq!(acts(&mut m).pop(), want_act, "{k}");
-        assert!(
-            m.kept::<super::discuss::Verdicts>().waiting.is_empty(),
-            "{k}"
-        );
-    }
-}
-
 /// ctrl+home and ctrl+end pick your first and latest message, alt+enter
 /// opens it, and the draft stays (TestMessageNavigationKeepsDraft).
 #[test]
@@ -1088,164 +1007,4 @@ fn btw_text_selects() {
         !m.kept::<Btws>().threads["k"].sel.on,
         "a click elsewhere kept it"
     );
-}
-
-/// The panel is told where the chat stands: idle since when, and its plan
-/// (TestChatStatus).
-#[test]
-fn chat_status_says_where_it_stands() {
-    let now: i64 = 1_790_000_000_000;
-    let mut s = rush_convo::Session::new();
-    s.sent("go".into(), vec![], now - 4 * 3_600_000);
-    s.apply(
-        &rush_core::event::Event::TurnEnd(Default::default()),
-        now - 3 * 3_600_000,
-    );
-    let t = s.turns.last_mut().unwrap();
-    t.end = now - 3 * 3_600_000;
-    t.live = false;
-    s.tasks.push(rush_convo::Task {
-        subject: "visual diff".into(),
-        status: "in_progress".into(),
-        ..Default::default()
-    });
-    let got = super::discuss::chat_status(&s, now);
-    assert!(
-        got.starts_with("Status: idle since ") && got.contains("(3h0m0s ago)"),
-        "{got}"
-    );
-    assert!(got.contains("Plan:\n- [in_progress] visual diff"), "{got}");
-}
-
-/// #intervene goes through the chat with its steps, and its verdict goes
-/// in the box (TestInterveneFromChat).
-#[test]
-fn intervene_from_chat() {
-    let mut m = hosted(200, 45);
-    say(&mut m, "make the visual diff work");
-    apply(&mut m, rush_core::event::Event::TurnEnd(Default::default()));
-    super::discuss::intervene(&mut m, "k", "visual diff stalled");
-    match acts(&mut m).pop() {
-        Some(Act::Room(r)) => {
-            assert!(r.fill && r.from == "k", "{r:?}");
-            assert!(r.topic.contains("visual diff stalled"), "{}", r.topic);
-            assert!(
-                super::discuss::brief(&r).contains("[turn "),
-                "the brief has no times: {}",
-                super::discuss::brief(&r)
-            );
-        }
-        a => panic!("no room: {a:?}"),
-    }
-}
-
-/// #discuss and #intervene typed in the list's box take the chat shown
-/// beside it on the row picked (Go's m.host is the pane's, keys.go:936);
-/// with the pick moved off it, #intervene asks for a chat.
-#[test]
-fn discuss_and_intervene_from_the_list_take_the_chat_beside_it() {
-    let mut m = hosted(200, 45);
-    say(&mut m, "why is it slow");
-    m.pane = m.session.take();
-    m.sel = "k".into();
-    m.command("#discuss");
-    match acts(&mut m).pop() {
-        Some(Act::Room(r)) => assert_eq!(
-            (r.from.as_str(), r.topic.as_str(), r.ctx),
-            ("k", "why is it slow", 1)
-        ),
-        a => panic!("no room: {a:?}"),
-    }
-    m.kept::<super::tests::Fake>().acts.clear();
-    m.command("#intervene stalled");
-    match acts(&mut m).pop() {
-        Some(Act::Room(r)) => assert!(r.fill && r.from == "k", "{r:?}"),
-        a => panic!("no room: {a:?}"),
-    }
-    m.kept::<super::tests::Fake>().acts.clear();
-    m.sel = "other".into();
-    m.command("#intervene");
-    assert!(acts(&mut m).is_empty());
-}
-
-/// A verdict comes back once, and a room on the chat shows above its box
-/// while it runs, another chat's never (TestDiscussFromChat,
-/// TestChatRoomPanel).
-#[test]
-fn verdicts_and_rooms_on_the_chat() {
-    use rush_room::room::{Member, Room, Summary};
-    let mut m = hosted(200, 45);
-    let sum = Summary {
-        room: Room {
-            id: "r1".into(),
-            topic: "the cache".into(),
-            from: "k".into(),
-            ..Default::default()
-        },
-        verdict: true,
-        final_: "Haiku: safe\nLuna: safe".into(),
-        ..Default::default()
-    };
-    super::discuss::verdicts_back(&mut m, vec![sum.clone()]);
-    assert_eq!(info(&m, "k").unwrap().input, "", "straight in the box");
-    let dock = super::tests::text(&super::discuss::verdict_rows(&m, "k", 200));
-    for want in [
-        "has a verdict",
-        "asked: the cache",
-        "Luna: safe",
-        "enter send it to this agent",
-        "e edit it first",
-        "esc drop it",
-    ] {
-        assert!(dock.contains(want), "no {want:?} in the dock:\n{dock}");
-    }
-    press(&mut m, "esc");
-    super::discuss::verdicts_back(&mut m, vec![sum]);
-    assert!(
-        m.kept::<super::discuss::Verdicts>().waiting.is_empty(),
-        "a verdict came back twice"
-    );
-
-    let member = |n: &str| Member {
-        name: n.into(),
-        ..Default::default()
-    };
-    let mut last = HashMap::new();
-    last.insert("Haiku".to_string(), "it's safe".to_string());
-    m.kept::<super::discuss::Verdicts>().rooms = vec![
-        Summary {
-            room: Room {
-                id: "other".into(),
-                topic: "elsewhere".into(),
-                from: "nobody".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Summary {
-            room: Room {
-                id: "r2".into(),
-                topic: "the cache".into(),
-                from: "k".into(),
-                members: vec![member("Haiku"), member("Luna")],
-                ..Default::default()
-            },
-            round: 2,
-            speaking: vec!["Luna".into()],
-            last,
-            ..Default::default()
-        },
-    ];
-    let dock = super::tests::text(&super::discuss::chat_room_rows(&m, "k", 200));
-    for want in [
-        "room · the cache",
-        "round 2/4 · 2 agents",
-        "Haiku  it's safe",
-        "Luna",
-    ] {
-        assert!(dock.contains(want), "no {want:?} in the dock:\n{dock}");
-    }
-    assert!(!dock.contains("elsewhere"), "another chat's room shows");
-    m.kept::<super::discuss::Verdicts>().rooms[1].over = "done".into();
-    assert!(super::discuss::chat_room_rows(&m, "k", 200).is_empty());
 }

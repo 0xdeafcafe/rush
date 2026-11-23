@@ -280,9 +280,6 @@ pub type ActFn = fn(&mut Model, Act);
 pub enum Act {
     /// The key guide (cmdbar/keyhelp.rs open).
     OpenKeyHelp,
-    /// A room in the pane, by its row's key or a member's
-    /// (social/rooms.rs open_room).
-    OpenRoom(String),
     /// Projects at a project's folder (projects_machine pick_in_projects).
     PickInProjects(String),
     /// The hosts are watched again after an update (settings/updates.rs
@@ -413,9 +410,6 @@ calls! {
     summary_strip("list_extras"): fn(&mut Model, usize) -> Option<Line>,
     /// A harness's own spinner at a tick (list_extras/wall.rs spin).
     spin("list_extras"): fn(&str, usize) -> &'static str,
-    /// An #intervene waiting for its chat, run when ready
-    /// (session_cards/discuss.rs intervene_ready).
-    intervene_ready("session_cards"): fn(&mut Model) -> bool,
     /// A memory file with unsaved edits (session_core/memedit.rs
     /// dirty_path).
     dirty_path("session_core"): fn(&mut Model) -> Option<String>,
@@ -426,14 +420,6 @@ calls! {
     resized("settings"): fn(&mut Model),
     /// How far a second line fades (settings/interface.rs sub_line_fade).
     sub_line_fade("settings"): fn(&str) -> f64,
-    /// A room's Session header: its agent and line (social/rooms.rs
-    /// pane_head).
-    pane_head("social"): fn(&Model, &str) -> Option<(Agent, Line)>,
-    /// A room's row (rooms.rs room_line).
-    room_line("social"): fn(&rush_room::room::Summary, usize, bool, usize) -> Line,
-    /// A room member's row (rooms.rs room_member_line).
-    room_member_line("social"):
-        fn(Option<&rush_room::room::Summary>, &Agent, usize, bool, usize) -> Line,
     /// What the runaway guard says on an agent's row
     /// (accounts/guard.rs row_note).
     row_note("accounts"): fn(&Model, &Agent) -> Option<String>,
@@ -615,9 +601,6 @@ calls! {
     /// A new session in a folder as a start says, with what Settings gives
     /// its agent for the rest (session_core/start.rs config_as).
     config_as("session_core"): fn(&Model, &crate::accounts::StartOver, &str) -> crate::host::Start,
-    /// The rooms as just read: each finished room on a chat hands its
-    /// verdict back (session_cards/discuss.rs verdicts_back).
-    verdicts_back("session_cards"): fn(&mut Model, Vec<rush_room::room::Summary>),
     /// The view a session shows (session_core/views.rs view_name).
     view_name("session_core"): fn(&Model, &str) -> &'static str,
     /// Whether a session has runs or tasks the dock would show

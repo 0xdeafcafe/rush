@@ -16,7 +16,6 @@ mod tests_live;
 mod tests_plan;
 mod tests_predict;
 mod tests_rename;
-mod tests_rooms;
 mod tests_subs;
 mod tests_taskrow;
 mod tests_turnwants;

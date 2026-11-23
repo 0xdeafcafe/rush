@@ -41,9 +41,7 @@ pub mod state;
 
 // The base's modules, so crate::frame::.. and the like read as they did
 // in rush-ui. Each is the one module, not a copy.
-use rush_ui_base::{
-    accounts, config, context, frame, model, paint, rooms, sess, startdir, style, worker,
-};
+use rush_ui_base::{accounts, config, context, frame, model, paint, sess, startdir, style, worker};
 
 // Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
@@ -150,11 +148,11 @@ fn use_command(m: &mut Model, arg: &str) -> Out {
 }
 
 /// The session #use switches: the one open, when it's the agent picked
-/// and not a room (keys.go:957-960).
+/// (keys.go:957-960).
 pub fn use_session(m: &Model) -> Option<String> {
     let key = m.session.as_ref().map(|v| v.key.clone())?;
     let a = m.selected_row()?;
-    (a.key == key && !crate::rooms::is_room_key(&key)).then_some(key)
+    (a.key == key).then_some(key)
 }
 
 /// #preset, #profile, #agent: #use, as they were, saying what it's

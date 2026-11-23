@@ -26,7 +26,6 @@ use super::outside::{remove_outside, stop_outside};
 use crate::frame::{Confirm, Ext, Out, Press};
 use crate::host::hosts;
 use crate::model::Model;
-use crate::rooms::is_room_key;
 
 /// Adds the commands and list keys (keys.go:462-466, :998-1043).
 pub fn register(x: &mut Ext) {
@@ -371,7 +370,7 @@ pub fn dismiss(m: &mut Model, a: Option<Agent>) -> Out {
     let Some(a) = a else {
         return Out::Idle;
     };
-    if is_room_key(&a.key) || a.past || a.interactive {
+    if a.past || a.interactive {
         return ask_close(m, Some(a));
     }
     if a.busy() {
@@ -398,9 +397,6 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
     let Some(a) = a else {
         return Out::Idle;
     };
-    if is_room_key(&a.key) {
-        return rush_ui_social::rooms::ask_hide_room(m, &a);
-    }
     let name = a.display_name.clone();
     let hide = a.clone();
     let mut c = Confirm::new(format!("Hide {name}?"), move |m| close_agent(m, &hide));

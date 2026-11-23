@@ -11,7 +11,6 @@
 //! (Go's least is a quarter of it), and a wide screen doesn't push it
 //! wider so the Session stays under 128 columns (Go's maxPane).
 
-use crate::frame::ext::Act;
 use crate::model::Model;
 
 /// The narrowest pane worth splitting the screen for (minPane).
@@ -143,10 +142,7 @@ pub fn settle(m: &mut Model) {
     if m.session.is_some() || !previewing(m) || go_widths(m).0 > 0 {
         return;
     }
-    let key = m.sel.clone();
-    if crate::rooms::is_room_key(&key) {
-        m.act(Act::OpenRoom(key));
-    } else if let Some(i) = m.focused() {
+    if let Some(i) = m.focused() {
         m.open(i);
     }
     if m.session.is_none() {

@@ -90,14 +90,10 @@ fn calls() -> Calls {
         predict_moved: Some(list_extras::predict::moved),
         summary_strip: Some(list_extras::live::summary_strip),
         spin: Some(list_extras::wall::spin),
-        intervene_ready: Some(session_cards::discuss::intervene_ready),
         dirty_path: Some(session_core::memedit::dirty_path),
         prime_spawns: Some(session_core::subs::prime_spawns),
         resized: Some(settings::resized),
         sub_line_fade: Some(settings::interface::sub_line_fade),
-        pane_head: Some(social::rooms::pane_head),
-        room_line: Some(social::rooms::room_line),
-        room_member_line: Some(social::rooms::room_member_line),
         row_note: Some(accounts::guard::row_note),
         guard_state: Some(accounts::guard::header_state),
         limits_fetched: Some(bars::fetch::fetched_once),
@@ -193,7 +189,6 @@ fn calls() -> Calls {
         models: Some(accounts::setup::models),
         load_models: Some(accounts::startsheet::load_models),
         config_as: Some(session_core::start::config_as),
-        verdicts_back: Some(session_cards::discuss::verdicts_back),
         view_name: Some(session_core::views::view_name),
         running_any: Some(session_core::running::any),
         clear_hover: Some(|m, key| {
@@ -267,7 +262,6 @@ fn predict_left(k: &mut Kept) -> Option<&mut SessionView> {
 fn act(m: &mut Model, a: Act) {
     match a {
         Act::OpenKeyHelp => cmdbar::keyhelp::open(m),
-        Act::OpenRoom(key) => social::rooms::open_room(m, &key),
         Act::PickInProjects(dir) => projects_machine::pick_in_projects(m, &dir),
         Act::WatchHosts { rebuilt_said } => {
             // Said already: the hosts' look doesn't say it again
@@ -353,17 +347,6 @@ fn chores() -> Vec<Chore> {
             when: always,
             run: list_extras::stuck::nudge_stuck_subs,
         },
-        // The rooms, every second while one runs: Go reads them on each
-        // reading, which its tick makes every second (model.go:1089-1092,
-        // snapload.go:60), so a room's round and verdict show though no
-        // session changed. Read off the UI thread, drawn only when changed.
-        Chore {
-            at: 1,
-            every: 1,
-            lead_only: false,
-            when: social::rooms::any_running,
-            run: social::rooms::tick_rooms,
-        },
     ]
 }
 
@@ -375,6 +358,6 @@ mod tests {
         let m = crate::new_model("t");
         assert_eq!(m.ext.calls.missing(), Vec::<&str>::new());
         assert!(m.ext.act.is_some());
-        assert_eq!(m.ext.chores.len(), 6);
+        assert_eq!(m.ext.chores.len(), 5);
     }
 }

@@ -91,11 +91,6 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     };
     let s = k.s.as_str();
-    // A room's own keys first (paneKey's roomPaneKey).
-    let o = rush_ui_social::rooms::pane_key(m, &key, s);
-    if o.used() {
-        return o;
-    }
     // The task row's head on the box, picked: its own keys.
     let o = tasks_nav(m, &key, s);
     if o.used() {
@@ -218,14 +213,6 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "enter" => {
             if empty {
                 return Out::Idle;
-            }
-            if mode_of(m, &key) == SendMode::Discuss {
-                // What's typed is the room's topic (discuss.go:192
-                // discussTyped).
-                let c = conn(m, &key);
-                let topic = c.input.sent(true);
-                c.input.clear();
-                return rush_ui_session_cards::discuss::discuss(m, &key, &topic, true);
             }
             return send(m, &key, false);
         }
@@ -747,10 +734,6 @@ pub fn box_vert(m: &mut Model, key: &str, d: isize, shift: bool) {
 /// works (queued, guiding, stopping it first). A trailing backslash goes
 /// on to a new line instead.
 pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
-    // A room's box says it in the room (sendPane's isRoomKey).
-    if let Some(o) = rush_ui_social::rooms::send_from(m, key) {
-        return o;
-    }
     // Plugins still looking at it, or a wake taking it: it goes once
     // that's done (rushmode.go:4627).
     if conn(m, key).intercepting || conn(m, key).waking {

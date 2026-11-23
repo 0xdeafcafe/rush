@@ -1,6 +1,6 @@
 //! How enter sends to a session that's working: into its queue, into the
-//! turn under way, stopping it first, or into a room. Each session keeps
-//! its own; ctrl+t goes round what its agent can do. After Go's
+//! turn under way, or stopping it first (Go's fourth, into a room, went
+//! with rooms: Rust-only). Each session keeps its own; ctrl+t goes round what its agent can do. After Go's
 //! internal/ui/sendmode.go (sendModes :28, sendModeOf :41, nextSendMode
 //! :52, cycleSendMode :65, the words :79-91, sendModeTop :95, boxKeys
 //! :105, sendModeKeys :149).
@@ -14,8 +14,6 @@ pub enum SendMode {
     Queue,
     Guide,
     Stop,
-    /// enter opens a room on what's typed, not sending it.
-    Discuss,
 }
 
 impl SendMode {
@@ -25,7 +23,6 @@ impl SendMode {
             SendMode::Queue => "queues",
             SendMode::Guide => "guides: it reads it at its next step",
             SendMode::Stop => "stops it and sends",
-            SendMode::Discuss => "opens a room on what's typed: its verdict comes back here",
         }
     }
 
@@ -35,7 +32,6 @@ impl SendMode {
             SendMode::Queue => "queue",
             SendMode::Guide => "guide",
             SendMode::Stop => "stop & send",
-            SendMode::Discuss => "discuss",
         }
     }
 
@@ -47,7 +43,6 @@ impl SendMode {
             SendMode::Queue => "enter queues it for when it's done",
             SendMode::Guide => "enter guides it at its next step",
             SendMode::Stop => "enter stops it and sends",
-            SendMode::Discuss => "enter opens a room on it",
         }
     }
 
@@ -57,7 +52,6 @@ impl SendMode {
             SendMode::Queue => "queue",
             SendMode::Guide => "guide",
             SendMode::Stop => "stop & send",
-            SendMode::Discuss => "discuss",
         }
     }
 
@@ -67,7 +61,6 @@ impl SendMode {
             SendMode::Queue => "queue it",
             SendMode::Guide => "guide it",
             SendMode::Stop => "stop & send",
-            SendMode::Discuss => "discuss it",
         }
     }
 }
@@ -81,7 +74,6 @@ pub fn modes(reg: &Registry, kind: &str) -> Vec<SendMode> {
     if reg.supports(kind, Feature::Interrupt) {
         out.push(SendMode::Stop);
     }
-    out.push(SendMode::Discuss);
     out
 }
 
@@ -107,9 +99,6 @@ pub fn next_mode(picked: Option<SendMode>, modes: &[SendMode]) -> SendMode {
 
 /// The flash after ctrl+t picked next.
 pub fn cycled(next: SendMode) -> String {
-    if next == SendMode::Discuss {
-        return format!("enter {}", next.words());
-    }
     format!("enter {} while it works", next.words())
 }
 
@@ -122,9 +111,10 @@ pub struct BoxState {
     pub working: bool,
     pub typed: bool,
     pub queued: bool,
-    /// The way picked, None for none picked.
-    pub picked: Option<SendMode>,
     pub mode: SendMode,
+    /// Its agent takes a message mid-turn more ways than one: ctrl+t
+    /// goes round them.
+    pub ways: bool,
     /// The box was wiped lately.
     pub cleared: bool,
 }
@@ -137,9 +127,7 @@ pub const UNDO_HINT: &str = "cmd+z or ctrl+/";
 
 pub fn box_keys(b: &BoxState) -> Vec<(&'static str, &'static str)> {
     let mut pairs = Vec::new();
-    if b.typed && b.picked == Some(SendMode::Discuss) {
-        pairs.push(("enter", "discuss it in a room"));
-    } else if b.typed && b.live {
+    if b.typed && b.live {
         pairs.push(("enter", b.mode.key_words()));
         pairs.push((SEND_NOW, "send now"));
     } else if b.typed && b.working {
@@ -150,10 +138,11 @@ pub fn box_keys(b: &BoxState) -> Vec<(&'static str, &'static str)> {
     } else if b.queued {
         pairs.push((SEND_NOW, "send the queue now"));
     }
-    if b.live {
+    if b.live && b.ways {
         // Not Go's "queue · guide · stop · discuss", four names with
         // nothing to say which is on or what the key does to them: the
         // box's edge says what enter does now and what ctrl+t makes it.
+        // Rust-only: not said of an agent that only queues.
         pairs.push((SEND_MODE, "what enter does while it works"));
     }
     if b.working {

@@ -40,7 +40,6 @@ pub mod paint;
 pub mod pastes;
 pub mod plan;
 pub mod predict;
-pub mod rooms;
 pub mod search;
 pub mod sess;
 pub mod session;

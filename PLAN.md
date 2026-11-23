@@ -32,7 +32,7 @@ against the Go one. The Go version keeps shipping until milestone 8.
 | 4 | **Every provider**: codex, kimi/vibe/opencode (ACP), copilot, gemini, antigravity, pi, ollama, deepseek, glm, cross-harness switching | adapters/*, harnessup, agent/usage (quotas) | ~23k | one crate per adapter family: codex, acp, … |
 | 5 | **Places**: overview, ctrl+k jump and transcript search, history, help, keymap | ui (overview, cmdbar, history, keyhelp…), convo find/search/indexer, cards, exchange, keymap | ~30k | search |
 | 6 | **Settings and spend**: settings (every tab), accounts and limits, efficiency and the advisor, onboarding, providers, `#ask` | ui settings_*, accounts, usage, onboard, askrush; efficiency, advisor | ~25k | efficiency |
-| 7 | **Plugins**: plugind, the plugin runtime and approvals, bundled plugins, agtools MCP server, statusline, gate, rooms, community feed, push-later, squeeze | plugin, plugind, hooks, bundled/*, agtools, statusline, settingsfile, gate, room, community, pushlater, squeeze | ~18k | plugin, plugind, bundled |
+| 7 | **Plugins**: plugind, the plugin runtime and approvals, bundled plugins, agtools MCP server, statusline, gate, community feed, push-later, squeeze | plugin, plugind, hooks, bundled/*, agtools, statusline, settingsfile, gate, room, community, pushlater, squeeze | ~18k | plugin, plugind, bundled |
 | 8 | **Outside rush + cutover**: pr drive, watch, serve/remote, menubar (native, objc2 like decline), update, `rush on/off`, every remaining subcommand; then retire Go | prdrive, watch, remote, menubar, update, cmd/rush | ~15k | pr, watch, remote, menubar |
 
 Sizes are Go lines without tests; ui is split across 2–6 by screen.

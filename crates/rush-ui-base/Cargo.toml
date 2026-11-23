@@ -23,7 +23,7 @@ rush-update.workspace = true
 # A workflow's files and a sign-in's renewal (lead.rs).
 rush-claude.workspace = true
 rush-plugin = { path = "../rush-plugin" }
-# Room summaries in the list (rooms.rs).
+# The @handles of sessions (rush_room::handle).
 rush-room = { path = "../rush-room" }
 # A session's exchanges and its host's config (model.rs, worker.rs).
 rush-host = { path = "../rush-host" }

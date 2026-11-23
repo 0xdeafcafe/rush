@@ -184,9 +184,6 @@ fn enter_on(m: &mut Model) -> Out {
         return Out::Pass;
     };
     let key = m.agents[i].key.clone();
-    if m.room_of(&key).is_some() {
-        return Out::Pass;
-    }
     // rush's one config, once it's read.
     let Some(cfg) = crate::accounts::loaded_config(m) else {
         return Out::Pass;

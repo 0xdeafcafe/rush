@@ -43,26 +43,6 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "",
     ),
     (
-        "room",
-        "a full-screen group chat: fresh agents argue a topic to a verdict, and you're in it",
-        "[new|topic]",
-    ),
-    (
-        "discuss",
-        "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here",
-        "[topic]",
-    ),
-    (
-        "intervene",
-        "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box",
-        "[@agent] [concern]",
-    ),
-    (
-        "broadcast",
-        "send one message to several agents: all, @names, or alone to click them in the list",
-        "[all|@agent…] [message]",
-    ),
-    (
         "log",
         "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
         "",

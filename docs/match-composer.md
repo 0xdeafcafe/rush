@@ -164,9 +164,6 @@ stay readable and stop being written. Builtin profiles are one tile each.
 
 - `alt+m` already is `list.start` and `session.start` (`keymap/defaults.go`).
   It keeps the meaning, and gains the unfold-then-full step.
-- `alt+1…9` open a room member's session (`roomfeed.go:126`). That's in a
-  room, not the list's input box, but check they don't collide before
-  binding them in `List`.
 - `alt+w` is `profile.pick`; its title changes with its behaviour.
 
 ## Build order

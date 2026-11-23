@@ -16,7 +16,6 @@ use crate::frame::Out;
 use crate::frame::caps::agent_can_run;
 use crate::model::Model;
 use crate::style::*;
-use rush_ui_social::broadcast::ModelBroadcast;
 
 // rush's # commands are the base's: the keymap's actions name them
 // (crate::keybind).
@@ -186,7 +185,7 @@ pub fn filter_commands(q: &str, lists: &[&[Command]]) -> Vec<Command> {
 }
 
 /// What a command offers once you've typed a space, and which of them is
-/// in use now (fleetArgs): #on's machines, #broadcast's names and #view's
+/// in use now (fleetArgs): #on's machines and #view's
 /// now as well as the fixed ones. #with's are newcmd's.
 pub fn fleet_args_of(m: &Model, name: &str) -> (Vec<String>, String) {
     match name {
@@ -196,16 +195,6 @@ pub fn fleet_args_of(m: &Model, name: &str) -> (Vec<String>, String) {
                 cfg.peers.into_iter().map(|p| p.name).collect(),
                 String::new(),
             )
-        }
-        "broadcast" => {
-            let mut opts = vec!["all".to_string()];
-            for i in m.broadcast_all() {
-                opts.push(format!(
-                    "@{}",
-                    rush_ui_social::broadcast::mention_name(&m.agents[i])
-                ));
-            }
-            (opts, String::new())
         }
         "view" => {
             let now = match crate::split::widths(m) {

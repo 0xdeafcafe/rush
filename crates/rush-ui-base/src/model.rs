@@ -525,7 +525,7 @@ impl Model {
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Hosted | session::Source::Room => None,
+                    session::Source::Hosted => None,
                     src => {
                         let (open, resume) = match start {
                             Some((r, resume)) => (worker::Open::Reading(r), resume),
@@ -677,11 +677,6 @@ impl Model {
                     // Peeking from a Session, enter opens the one picked,
                     // as it was (keys.go:386).
                     self.ext.calls.open_peeked()(self, i);
-                } else if self.open_room_for(&self.sel.clone()) {
-                    // A room, or one of its agents: the room opens
-                    // (keys.go:392), its box saying what's typed in it.
-                    let key = self.sel.clone();
-                    self.act(Act::OpenRoom(key));
                 } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
@@ -731,17 +726,10 @@ impl Model {
         Out::Draw
     }
 
-    /// Into the picked agent's Session, its box taking the keys; a room's
-    /// row, or one of its agents, opens the room (focusPane,
+    /// Into the picked agent's Session, its box taking the keys (focusPane,
     /// rushmode.go:5291).
     fn focus_pane(&mut self) {
-        if self.open_room_for(&self.sel.clone()) {
-            // A room's row, or one of its agents: the room opens
-            // in the pane (switchFocus → focusPane → openRoomFor,
-            // rushmode.go:5295), so what's typed next goes to it.
-            let key = self.sel.clone();
-            self.act(Act::OpenRoom(key));
-        } else if let Some(i) = self.selected() {
+        if let Some(i) = self.selected() {
             self.open(i);
         }
     }
@@ -1225,26 +1213,17 @@ impl Model {
     fn session_frame(&mut self, out: &mut Vec<Line>, body_h: usize) {
         self.session_h = body_h;
         let (w, now, tick) = (self.w, self.now, self.tick);
-        let room = match &self.session {
-            Some(v) => self.ext.calls.pane_head()(self, &v.key),
-            None => return,
-        };
         let (beside, idle) = (self.in_pane, self.pane_idle);
         let Some(v) = self.session.as_mut() else {
             return;
         };
         (v.beside, v.idle) = (beside, idle);
-        let (a, conn) = match &room {
-            Some((a, conn)) => (Some(a), Some(conn.clone())),
-            None => (self.agents.iter().find(|a| a.key == v.key), None),
-        };
-        let mut head = session::header(a, v, w, now, &self.reg, conn);
+        let a = self.agents.iter().find(|a| a.key == v.key);
+        let mut head = session::header(a, v, w, now, &self.reg);
         let a_live = a.is_some_and(|a| a.job.live());
         // The header's wash is its agent's harness and provider's colours
-        // (paneHeader's kind); a room's has none.
-        let kind = a
-            .filter(|_| room.is_none())
-            .map(|a| a.kind.as_str().to_string());
+        // (paneHeader's kind).
+        let kind = a.map(|a| a.kind.as_str().to_string());
         for i in 0..self.ext.session_head.len() {
             let f = self.ext.session_head[i];
             f(self, &mut head, w);
@@ -1889,13 +1868,6 @@ impl Model {
             Msg::App(note) => self.note(note),
         };
         self.keep_undo(g);
-        // An #intervene @agent waiting for its chat (model.go:933
-        // interveneReady).
-        let st = if self.ext.calls.intervene_ready()(self) {
-            Step::Draw
-        } else {
-            st
-        };
         // A hosted view stays on its session (pinHosted).
         if self.ext.calls.hosted_pin()(self) && st == Step::Idle {
             return Step::Draw;

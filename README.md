@@ -48,7 +48,7 @@ rush started because Claude Code's own view needed about 330 MB to show me one s
 Type and press enter: that's a new agent. Everything else hangs off the same box.
 
 - `/` is the agent's: its commands and skills, with Claude Code's own (`/context`, `/rewind`, `/fork`, `/btw`) drawn properly.
-- `#` is rush's: `#new`, `#use`, `#fork`, `#remember`, `#discuss` and plenty more, each completing as you type.
+- `#` is rush's: `#new`, `#use`, `#fork`, `#remember`, `#land` and plenty more, each completing as you type.
 - `!` runs a shell command of your own, right there in the conversation, without waiting for the agent or interrupting it.
 - `@` tags another agent or a file.
 - `ctrl+k` goes anywhere: an agent, a view, turn `#12`, or a search across every transcript you've got (`in:name`, `is:failed`, `file:x`).
@@ -103,7 +103,6 @@ Around them sit **Changes** (every file the session touched, which turn wrote ea
 - **Every key moves.** Settings › Keys rebinds anything, chords included, and every `#` command can have a key of its own.
 - **Drafts never die.** `ctrl+p` stashes what you've typed, `ctrl+r` brings back anything you stashed, sent or cleared, across restarts.
 - **The guide** (`alt+/`) is a fast model floating over everything that can see your sessions. Ask "what's next?" and it opens the one that needs you.
-- **Rooms.** `#discuss` puts a panel of fresh agents on the open chat to argue it out, and the verdict comes back as a card to send on. `#intervene` gets two agents to work out why one's stuck.
 - **Spend less.** rush keeps an idle session's prompt cache warm for about a tenth of its price, refuses an agent re-reading a file that hasn't changed, and the runaway guard stops a busy afternoon spending a week's limit.
 - **Memory.** `#remember <what>` writes a note with a cheap model and asks before keeping it. The Memory view shows how often each note is actually opened, and a review finds the stale ones.
 - **Pull requests.** `rush pr follow 1234` gives an agent what's left before merge, in order, then wakes it only with news it can act on: a failed check with its log, a trusted review finding, a conflict. Comments from outside the repo never reach it. `rush watch pr` waits on checks without polling GitHub.

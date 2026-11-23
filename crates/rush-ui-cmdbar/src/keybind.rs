@@ -183,7 +183,7 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         // The Prompt's stash (keybind.go:208-211).
         "prompt.stash" => rush_ui_list_extras::stash::command(m, "stash"),
         "prompt.history" => rush_ui_list_extras::stash::command(m, "history"),
-        // The session's own: quick ask, recall, discuss (keybind.go:188-211),
+        // The session's own: quick ask, recall (keybind.go:188-211),
         // then its turns, depth, switch sheet, mode and box (:155-189).
         _ => match rush_ui_session_cards::run_action(m, id) {
             Out::Pass => (m.ext.calls.core_action())(m, id),

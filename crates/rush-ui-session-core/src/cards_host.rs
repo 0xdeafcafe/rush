@@ -23,8 +23,7 @@
 //! with no Go.
 //!
 //! Renaming from enter's first answer is the list's startRename
-//! (list_extras::rename), a room set up from a chat the room screens'
-//! sheet (social::roomsetup, room.go roomSetup).
+//! (list_extras::rename).
 
 use rush_core::agent::State;
 use rush_fleet::Predicates;
@@ -467,7 +466,6 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         }
         Act::EnterOn(open) => enter_on(m, key, open),
         Act::Start(then) => super::keys::start_then(m, key, then),
-        Act::Room(ask) => rush_ui_social::roomsetup::chat_room(m, *ask),
     }
 }
 

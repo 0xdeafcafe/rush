@@ -24,11 +24,8 @@
 //! drawAgentRow, :1624 listLines, :1754 listRowLine, :1810 sectionLine,
 //! :2195 soloTree, :2336 the row's end tag as of 2e4662ff; folders.go:197
 //! projectLine, :309 treeLine, :319 treeTag) and subrows.go's rows.
-//! Rooms in the list: a room one row with its members under it, one
-//! opened from a chat under that chat (model.go:2251 roomize's rows,
-//! :2459 roomMembers' under them; view.go:1593 drawAgentRow's room and
-//! member rows, :1678; rail.go:63 railLast, :192 railRows; roomrows.go:50
-//! roomize, :125 roomMembers).
+//! Rust-only: Go's list also laid rooms out, a room one row with its
+//! members under it (roomrows.go); rooms were removed 2026-11-23.
 
 use std::collections::HashMap;
 
@@ -39,7 +36,6 @@ use rush_fleet::Predicates;
 
 use crate::landing::{land_of, tree_of};
 use crate::model::Model;
-use crate::rooms::{ROOM_KEY_PREFIX, RoomRows, Under, grouped};
 use crate::style::*;
 use crate::turnwants::{needs_you_of, turn_label, wants_mark, wants_of, wants_say, wants_you};
 
@@ -103,49 +99,18 @@ pub enum ListLine {
     },
     /// An agent, by its place in Model::agents.
     Agent(usize),
-    /// A room's own row, by its id; joined when it's under the chat it
-    /// was opened from (roomrows.go:50 roomize).
-    Room {
-        id: String,
-        joined: bool,
-    },
-    /// A room's member under it, by its place in Model::agents; joined
-    /// when its room is under a chat (model.go:2459).
-    Member {
-        i: usize,
-        joined: bool,
-    },
 }
 
 impl ListLine {
-    /// Whether it's a row ↑↓ stop on that isn't a heading: an agent's, a
-    /// room's or a member's (Go's lineAgent).
+    /// Whether it's a row ↑↓ stop on that isn't a heading: an agent's
+    /// (Go's lineAgent).
     pub fn is_row(&self) -> bool {
-        matches!(
-            self,
-            ListLine::Agent(_) | ListLine::Room { .. } | ListLine::Member { .. }
-        )
-    }
-
-    /// Steps in a row sits from its section's edge in the rail look: a
-    /// room and its members under the chat it was opened from sit one in
-    /// (model.go:2462 under).
-    fn inset(&self) -> usize {
-        match self {
-            ListLine::Room { joined: true, .. } | ListLine::Member { joined: true, .. } => {
-                ROW_INSET
-            }
-            _ => 0,
-        }
+        matches!(self, ListLine::Agent(_))
     }
 }
 
-/// What the list lays out: an agent, or a room's row.
-#[derive(Clone, Debug)]
-enum Item {
-    Agent(usize),
-    Room(String),
-}
+/// What the list lays out: an agent, by its place in Model::agents.
+type Item = usize;
 
 /// A row as drawn: which agent or section it acts on, and its part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,10 +121,6 @@ enum Part {
     Sub,
     /// The i'th of its running subagents (subrows.go).
     Subagent(usize),
-    /// A room's own row, and a member's under it (roomrows.go roomLine,
-    /// roomMemberLine).
-    Room,
-    Member,
 }
 
 struct Row {
@@ -176,9 +137,6 @@ struct Row {
     /// beside the name for its one agent.
     pad: usize,
     tag: Option<Line>,
-    /// Steps in from the section's edge in the rail look (a room joined
-    /// under its chat, and its members).
-    inset: usize,
 }
 
 pub fn section_key(title: &str) -> String {
@@ -476,9 +434,7 @@ pub struct RowHold {
 impl Model {
     /// Groups the agents into sections, what needs you first; what's put
     /// away, or finished more than a day ago, goes to Earlier
-    /// (model.go:2221 rebuild). A room is one row in place of its members,
-    /// which go under it, and a room opened from a chat goes under that
-    /// chat (model.go:2251, :2459; roomrows.go:50 roomize).
+    /// (model.go:2221 rebuild).
     pub fn rebuild(&mut self) {
         let now = self.now;
         // nameAgents (model.go:2231), which ends with namePeers.
@@ -497,24 +453,10 @@ impl Model {
             hold.key.clear(); // a new draft, or none: nothing held yet
         }
         let mut held = RowHold::default();
-        let rooms = match self.kept.peek::<RoomRows>() {
-            Some(rr) => grouped(&rr.list, &self.agents, &rr.hidden),
-            None => grouped(&[], &self.agents, &Default::default()),
-        };
         let agents = &self.agents;
         let roots = &self.roots;
-        let of = |it: &Item| -> &Agent {
-            match it {
-                Item::Agent(i) => &agents[*i],
-                Item::Room(id) => &rooms.row[id],
-            }
-        };
-        let root = |it: &Item| -> &str {
-            match it {
-                Item::Agent(i) => &roots[*i],
-                Item::Room(_) => "",
-            }
-        };
+        let of = |it: &Item| -> &Agent { &agents[*it] };
+        let root = |it: &Item| -> &str { &roots[*it] };
         struct Group {
             name: String,
             items: Vec<Item>,
@@ -543,12 +485,7 @@ impl Model {
         let just_left_for = self.cfg.just_left_for();
         let by = self.cfg.group_by.clone();
         let filters = self.ext.list_filter.clone();
-        let laid: Vec<Item> = rooms
-            .rows
-            .iter()
-            .map(|&i| Item::Agent(i))
-            .chain(rooms.rooms.iter().map(|id| Item::Room(id.clone())))
-            .collect();
+        let laid: Vec<Item> = (0..agents.len()).collect();
         // The soonest a group's time runs out for one listed.
         let mut regroup = Ms::MAX;
         // A plugin's arrangement: its sections replace rush's, each row
@@ -801,9 +738,7 @@ impl Model {
                         at: n,
                     };
                 }
-                if let Item::Agent(i) = it {
-                    order.push(*i);
-                }
+                order.push(*it);
                 group_of.insert(a.key.clone(), g.name.clone());
                 if fold {
                     continue;
@@ -827,32 +762,7 @@ impl Model {
                         });
                     }
                 }
-                let joined = match it {
-                    Item::Agent(i) => {
-                        lines.push(ListLine::Agent(*i));
-                        true // a room opened from a chat, joined under it
-                    }
-                    Item::Room(id) => {
-                        lines.push(ListLine::Room {
-                            id: id.clone(),
-                            joined: false,
-                        });
-                        false
-                    }
-                };
-                for u in rooms.under(&a.key) {
-                    match u {
-                        Under::Room(id) => {
-                            group_of.insert(rooms.row[&id].key.clone(), g.name.clone());
-                            lines.push(ListLine::Room { id, joined });
-                        }
-                        Under::Member(i) => {
-                            order.push(i);
-                            group_of.insert(self.agents[i].key.clone(), g.name.clone());
-                            lines.push(ListLine::Member { i, joined });
-                        }
-                    }
-                }
+                lines.push(ListLine::Agent(*it));
             }
             if !fold {
                 // Folded history stacks tight.
@@ -870,7 +780,6 @@ impl Model {
         self.memo.forget_widest_name();
         self.order = order;
         self.group_of = group_of;
-        self.kept::<RoomRows>().grouped = rooms;
         let items = self.items();
         if !items.contains(&self.sel) {
             self.sel = items
@@ -907,10 +816,7 @@ impl Model {
             .iter()
             .filter_map(|l| match l {
                 ListLine::Section { title, .. } => Some(section_key(title)),
-                ListLine::Agent(i) | ListLine::Member { i, .. } => {
-                    Some(self.agents[*i].key.clone())
-                }
-                ListLine::Room { id, .. } => Some(format!("{ROOM_KEY_PREFIX}{id}")),
+                ListLine::Agent(i) => Some(self.agents[*i].key.clone()),
                 ListLine::Blank | ListLine::Project { .. } | ListLine::Tree { .. } => None,
             })
             .collect()
@@ -937,6 +843,11 @@ impl Model {
     /// The agent picked, if a row is.
     pub fn selected(&self) -> Option<usize> {
         self.agents.iter().position(|a| a.key == self.sel)
+    }
+
+    /// The row picked, as an agent.
+    pub fn selected_row(&self) -> Option<Agent> {
+        self.selected().map(|i| self.agents[i].clone())
     }
 
     /// The list's right-hand columns at width w.
@@ -996,8 +907,7 @@ impl Model {
         self.lines
             .iter()
             .filter_map(|l| match l {
-                ListLine::Agent(i) | ListLine::Member { i, .. } => Some(&self.agents[*i]),
-                ListLine::Room { id, .. } => self.rooms_grouped().and_then(|g| g.row.get(id)),
+                ListLine::Agent(i) => Some(&self.agents[*i]),
                 _ => None,
             })
             .map(|a| {
@@ -1251,7 +1161,6 @@ impl Model {
                             } else {
                                 None
                             },
-                            inset: 0,
                         });
                     };
                     push(Part::Agent, false);
@@ -1265,93 +1174,6 @@ impl Model {
                     let n = self.ext.calls.sub_rows()(self, &a.key, a.subagents.len());
                     for s in 0..n {
                         push(Part::Subagent(s), true);
-                    }
-                }
-                ListLine::Room { .. } | ListLine::Member { .. } => {
-                    // A room's row and its members' under it, as an
-                    // agent's row is laid out (view.go:1678, rail.go:192
-                    // railRows), with no reason or subagents under a room.
-                    let (key, agent, part, joined) = match l {
-                        ListLine::Room { id, joined } => (
-                            format!("{ROOM_KEY_PREFIX}{id}"),
-                            usize::MAX,
-                            Part::Room,
-                            *joined,
-                        ),
-                        ListLine::Member { i, joined } => {
-                            (self.agents[*i].key.clone(), *i, Part::Member, *joined)
-                        }
-                        _ => continue,
-                    };
-                    let a = self.row_agent(&key, agent);
-                    let sel = key == self.sel;
-                    let inset = l.inset();
-                    let last = rail_last(&lines, li);
-                    let mut wash = None;
-                    let mut pad = 0;
-                    if rail {
-                        if inset == 0 {
-                            band = !band;
-                        }
-                        wash = a.and_then(|a| self.row_wash(a, sel));
-                        if wash.is_none() && band && !sel {
-                            wash = Some(BAND_BG);
-                        }
-                    } else {
-                        let mut ins = match (split_here, in_tree) {
-                            (false, _) => 0,
-                            (true, false) => ROW_INSET,
-                            (true, true) => 2 * ROW_INSET,
-                        };
-                        if joined {
-                            ins += ROW_INSET;
-                        }
-                        if tag.take().is_some() {
-                            ins = ins.saturating_sub(ROW_INSET);
-                        }
-                        pad = ins.saturating_sub(1); // a column in from the ▍
-                    }
-                    let says = part == Part::Member
-                        && two
-                        && a.is_some_and(|a| {
-                            self.says_why(a) || self.ext.calls.filter_match()(self, a)
-                        });
-                    let subs = if part == Part::Member && rail {
-                        self.ext.calls.sub_rows()(self, &key, self.agents[agent].subagents.len())
-                    } else {
-                        0
-                    };
-                    let mut push = |part: Part, cont: bool| {
-                        if sel && (wash.is_none() || !key.is_empty()) {
-                            sel_top.get_or_insert(rows.len());
-                            sel_bottom = rows.len();
-                        }
-                        rows.push(Row {
-                            line: Line::new(),
-                            key: key.clone(),
-                            part,
-                            agent,
-                            edge,
-                            last,
-                            wash,
-                            sel,
-                            cont,
-                            pad,
-                            tag: None,
-                            inset,
-                        });
-                    };
-                    push(part, false);
-                    if rail {
-                        if w > 7 + inset {
-                            push(Part::Where, true);
-                        }
-                        if says {
-                            push(Part::Sub, true);
-                        }
-                        for s in 0..subs {
-                            push(Part::Subagent(s), true);
-                        }
                     }
                 }
             }
@@ -1418,7 +1240,7 @@ impl Model {
         let mut l = match r.part {
             Part::Drawn => r.line.clone(),
             _ => {
-                let Some(a) = self.row_agent(&r.key, r.agent) else {
+                let Some(a) = self.agents.get(r.agent) else {
                     return fit(Line::new(), w);
                 };
                 let edge = if r.sel {
@@ -1426,21 +1248,11 @@ impl Model {
                 } else {
                     sp("┃", r.edge)
                 };
-                let pad_w = 4 + r.inset;
+                let pad_w = 4;
                 let mut l = Line::new();
                 l.spans.push(edge);
                 l.spans.push(plain(" "));
                 match r.part {
-                    Part::Room | Part::Member => {
-                        if r.inset > 0 {
-                            // Under the row that opened it.
-                            l.spans.push(sp("│ ", FAINT));
-                            l.spans.push(plain(blanks(r.inset)));
-                        } else {
-                            l.spans.push(sp(if r.last { "└─" } else { "├─" }, FAINT));
-                        }
-                        join(&mut l, self.room_row(r, a, w.saturating_sub(pad_w)));
-                    }
                     Part::Agent => {
                         l.spans.push(sp(if r.last { "└─" } else { "├─" }, FAINT));
                         let row = self.agent_line(
@@ -1459,9 +1271,14 @@ impl Model {
                         l.spans.push(plain("    "));
                         let rw = w.saturating_sub(pad_w + 3);
                         match r.part {
-                            Part::Where => {
-                                join(&mut l, self.agent_where_in(a, self.row_root(r), rw))
-                            }
+                            Part::Where => join(
+                                &mut l,
+                                self.agent_where_in(
+                                    a,
+                                    self.roots.get(r.agent).map_or("", String::as_str),
+                                    rw,
+                                ),
+                            ),
                             Part::Subagent(s) => {
                                 join(&mut l, self.ext.calls.sub_row_of()(self, a, s, w - 7, w))
                             }
@@ -1522,13 +1339,6 @@ impl Model {
             Part::Sub | Part::Where => {
                 let mut l = line([lead]);
                 join(&mut l, self.agent_sub(r.agent, rw));
-                l
-            }
-            Part::Room | Part::Member => {
-                let mut l = line([lead]);
-                if let Some(a) = self.row_agent(&r.key, r.agent) {
-                    join(&mut l, self.room_row(r, a, rw));
-                }
                 l
             }
         };
@@ -2040,41 +1850,6 @@ impl Model {
     }
 
     /// How long a has been at its current run.
-    /// The agent a row draws: a room's row as the list placed it, else
-    /// the agent at i.
-    fn row_agent(&self, key: &str, i: usize) -> Option<&Agent> {
-        match key.strip_prefix(ROOM_KEY_PREFIX) {
-            Some(id) => self.rooms_grouped()?.row.get(id),
-            None => self.agents.get(i),
-        }
-    }
-
-    /// The main checkout of a row's repository; "" for a room's.
-    fn row_root(&self, r: &Row) -> &str {
-        if r.key.starts_with(ROOM_KEY_PREFIX) {
-            ""
-        } else {
-            self.roots.get(r.agent).map_or("", String::as_str)
-        }
-    }
-
-    /// A room's row, or a member's under it (roomrows.go:190 roomLine,
-    /// :210 roomMemberLine).
-    fn room_row(&self, r: &Row, a: &Agent, w: usize) -> Line {
-        let (room_line, room_member_line) = (
-            self.ext.calls.room_line(),
-            self.ext.calls.room_member_line(),
-        );
-        let tick = self.tick;
-        if r.part == Part::Room {
-            return self
-                .room_of(&r.key)
-                .map(|s| room_line(s, w, r.sel, tick))
-                .unwrap_or_default();
-        }
-        room_member_line(self.room_of(&r.key), a, w, r.sel, tick)
-    }
-
     fn run_for(&self, a: &Agent) -> Ms {
         match self.run_since.get(&a.key) {
             Some(&t) if t != 0 => self.now - t,
@@ -2091,8 +1866,7 @@ impl Model {
         self.agent_where_in(a, &self.roots[i], w)
     }
 
-    /// agent_where with the main checkout of a's repository (root), ""
-    /// for a room's row.
+    /// agent_where with the main checkout of a's repository (root).
     fn agent_where_in(&self, a: &Agent, root: &str, w: usize) -> Line {
         if let Some(mut by) = started_by(a) {
             // A job rush or a plugin runs, in your home folder: who runs
@@ -2236,14 +2010,9 @@ const ROW_INSET: usize = 2;
 /// ends, so its branch closes (└─) rather than runs on (├─) (rail.go:63
 /// railLast).
 fn rail_last(lines: &[ListLine], i: usize) -> bool {
-    let at = lines[i].inset();
     for l in &lines[i + 1..] {
         match l {
-            l if l.is_row() => {
-                if l.inset() <= at {
-                    return false;
-                }
-            }
+            l if l.is_row() => return false,
             ListLine::Section { .. } | ListLine::Blank | ListLine::Project { .. } => return true,
             _ => {}
         }
@@ -2396,7 +2165,6 @@ impl Row {
             cont: false,
             pad: 0,
             tag: None,
-            inset: 0,
         }
     }
 }

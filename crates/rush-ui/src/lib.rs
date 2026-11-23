@@ -11,7 +11,7 @@
 pub use rush_ui_base::{
     accounts, agentry, attached, away, barfind, bridge, changes, config, finish, frame, host,
     imagerefs, jobprocs, keybind, landing, lead, list, look, mention, meters, overlay, paint,
-    pastes, plan, predict, rooms, search, sess, shells, sidecol, spawns, split, startdir, style,
+    pastes, plan, predict, search, sess, shells, sidecol, spawns, split, startdir, style,
     turnwants, update, worker,
 };
 use rush_ui_base::{chores, listcache, model, session};
@@ -35,7 +35,6 @@ use std::io;
 
 use rush_draw::{Headless, Key, KeyMods, Loop, Term};
 
-use crate::screens::social::rooms::ModelRooms;
 use crate::screens::social::services::ModelReload;
 
 pub use model::Model;
@@ -402,8 +401,6 @@ pub fn render(
     screens::projects_machine::read_machine(&mut m);
     std::thread::sleep(std::time::Duration::from_millis(500));
     m.set_fleet(d.load(rush_core::time::now(), false));
-    // The rooms, read where the list is (snapload.go:74 refreshNow).
-    m.load_rooms();
     screens::projects_machine::read_machine_again(&mut m);
     // What git says of the list's projects, as Go's Frame has it.
     screens::list_extras::landing::ask_folders(&mut m);

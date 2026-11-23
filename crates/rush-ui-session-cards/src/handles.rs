@@ -12,7 +12,7 @@ use rush_core::text::{Line, Link, Mods};
 
 use rush_room::handle::Names;
 
-use super::mention::{ROOM_KEY_PREFIX, handle_tint, mention_name, mentionable, tags};
+use super::mention::{handle_tint, mention_name, mentionable, tags};
 use crate::model::Model;
 use crate::style::one_line;
 use rush_ui_base::mention::{handle_key, kebab};
@@ -35,9 +35,9 @@ struct HandlesFor(Option<Vec<HandleKey>>);
 // An agent's host id (the frame's, crate::mention) gives it its handle.
 pub use rush_ui_base::mention::host_id;
 
-/// The id a mention of a keeps, when rush runs it (not a room).
+/// The id a mention of a keeps, when rush runs it.
 fn kept(a: &Agent) -> Option<&str> {
-    host_id(a).filter(|id| !id.is_empty() && !a.key.starts_with(ROOM_KEY_PREFIX))
+    host_id(a).filter(|id| !id.is_empty())
 }
 
 /// Tells rush_room::handle every session rush runs, by its title now, so

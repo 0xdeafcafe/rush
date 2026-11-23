@@ -7,12 +7,10 @@ use std::collections::HashMap;
 
 use rush_core::adapter::FileRewind;
 use rush_core::text::Line;
-use rush_room::room::{Member, Room, Summary};
 
 use super::asksheets::ExportSheet;
 use super::btw::{Qa, Thread, thread_lines};
 use super::compact::{CompactSheet, Summ};
-use super::discuss::{Verdicts, chat_room_rows, verdict_rows};
 use super::fork::{ForkSheet, ForkTurn};
 use super::message::{MessageSheet, UserMessage};
 use super::rewind::{Branch, FilesPreview, RewindSheet, TurnStart};
@@ -131,16 +129,6 @@ word word word word word word word word word word word word
 word word word word word word word word word word
 
 ↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close"#;
-const GO_VERDICT: &str = r#" ⇶ the room on this chat has a verdict · send it to this agent?
-   asked: which cache to use
-
-   alpha: use redis
-   beta: use memcached for now
-
-   enter send it to this agent  ·  e edit it first  ·  esc drop it"#;
-const GO_CHATROOM: &str = r#"  ⇶ room · which cache                                    round 2/4 · 2 agents
-      alpha  redis is simplest
-      beta"#;
 const GO_BTW: &str = r#"▍ btw  side question · not in the conversation
 ▍
 ▍ ❯ what is it doing?
@@ -361,45 +349,6 @@ fn message_as_go_draws_it() {
         1,
     );
     assert_eq!(body(&mut s, &m, 60, 20), GO_MESSAGE);
-}
-
-/// A room's verdict card, and the room running on the chat (discuss.go
-/// verdictRows :247, chatRoomRows :226).
-#[test]
-fn rooms_as_go_draws_them() {
-    let mut m = hosted(120, 40);
-    let v = m.kept::<Verdicts>();
-    v.waiting.insert(
-        "k".into(),
-        Summary {
-            room: Room {
-                topic: "which cache to use".into(),
-                ..Room::default()
-            },
-            final_: "alpha: use redis\nbeta: use memcached for now".into(),
-            ..Summary::default()
-        },
-    );
-    let mut last = HashMap::new();
-    last.insert("alpha".to_string(), "redis is simplest".to_string());
-    let member = |n: &str| Member {
-        name: n.into(),
-        ..Member::default()
-    };
-    v.rooms = vec![Summary {
-        room: Room {
-            id: "r1".into(),
-            from: "k".into(),
-            topic: "which cache".into(),
-            members: vec![member("alpha"), member("beta")],
-            ..Room::default()
-        },
-        round: 2,
-        last,
-        ..Summary::default()
-    }];
-    assert_eq!(rows(&verdict_rows(&m, "k", 80)), GO_VERDICT);
-    assert_eq!(rows(&chat_room_rows(&m, "k", 80)), GO_CHATROOM);
 }
 
 /// /btw's panel with the keys and a lost answer, and tucked away with

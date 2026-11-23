@@ -20,7 +20,7 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::look::kind_name;
-use crate::mention::{ROOM_KEY_PREFIX, drawn_handle};
+use crate::mention::drawn_handle;
 use crate::style::*;
 use crate::worker::TailHandle;
 
@@ -60,7 +60,7 @@ pub fn reading(src: &Source, host: &str) -> adapter::Result<Box<dyn Reading>> {
                 s,
             )?))
         }
-        Source::Hosted | Source::Room => Err("nothing to read on disk".into()),
+        Source::Hosted => Err("nothing to read on disk".into()),
     }
 }
 
@@ -116,9 +116,6 @@ pub enum Source {
     /// A session rush hosts with nothing to read on disk yet (one just
     /// started): its host's connection fills it (session_core/live.rs).
     Hosted,
-    /// A room: its log folded into a conversation (social/rooms.rs
-    /// RoomFeed, Go's roomFeed).
-    Room,
 }
 
 impl Source {
@@ -285,7 +282,7 @@ impl SessionView {
     pub fn new(key: String, source: Source, r#gen: u64) -> SessionView {
         SessionView {
             key,
-            caught_up: matches!(source, Source::Hosted | Source::Room),
+            caught_up: matches!(source, Source::Hosted),
             ended: false,
             source,
             sess: Session::new(),
@@ -333,7 +330,7 @@ impl SessionView {
     pub fn read_now(&mut self) {
         self.read = true;
         self.caught_up = true;
-        if matches!(self.source, Source::Hosted | Source::Room) {
+        if matches!(self.source, Source::Hosted) {
             return;
         }
         let mut r = match reading(&self.source, "") {
@@ -487,13 +484,9 @@ impl SessionView {
     }
 
     /// Who answers under your messages: its @handle, and what it is
-    /// (rushmode.go:2400, agentHandle and kindName); a room names each
-    /// speaker itself. Set as the view opens, so its first frame says it,
+    /// (rushmode.go:2400, agentHandle and kindName). Set as the view opens, so its first frame says it,
     /// and kept up as the list renames it. Whether it changed.
     pub fn name_speaker(&mut self, a: &Agent) -> bool {
-        if a.key.starts_with(ROOM_KEY_PREFIX) {
-            return false;
-        }
         let handle = drawn_handle(a);
         let kind = migrated(a.kind.as_str());
         let speaker = kind_name(rush_core::adapter::global(), kind.as_str());
@@ -955,16 +948,7 @@ fn turn_index(s: &Session, n: u32) -> Option<usize> {
 
 /// The pane's chrome, w wide: blank, name and state, where it works and
 /// what it is, the tab, a rule.
-/// conn, when given, is said where an agent's header says how it's
-/// connected: a room's says how it stands (paneHeader's roomConn).
-pub fn header(
-    a: Option<&Agent>,
-    v: &SessionView,
-    w: usize,
-    now: Ms,
-    reg: &Registry,
-    conn: Option<Line>,
-) -> Vec<Line> {
+pub fn header(a: Option<&Agent>, v: &SessionView, w: usize, now: Ms, reg: &Registry) -> Vec<Line> {
     let iw = w.saturating_sub(3);
     let chrome = |l: Line| {
         let mut out = line([Span::new("  ", Style::default().on(CHROME_BG))]);
@@ -1042,9 +1026,7 @@ pub fn header(
         row2.spans.push(sp(m, DIM));
     }
     let harness = harness_name(reg, &a.kind);
-    let said = if conn.is_some() {
-        String::new()
-    } else if a.past {
+    let said = if a.past {
         "past conversation".to_string()
     } else if a.headless {
         // Agent.Where (fleet.go:1551).
@@ -1054,7 +1036,7 @@ pub fn header(
     } else {
         harness
     };
-    let mut conn = conn.unwrap_or_else(|| line([sp(said, DIM)]));
+    let mut conn = line([sp(said, DIM)]);
     conn.spans.push(plain(" "));
     let row2 = crate::header::spread(row2, conn, iw);
     // tabLabel (rushmode.go:1418): the view's name, capitalised.

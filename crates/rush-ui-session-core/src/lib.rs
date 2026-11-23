@@ -88,8 +88,8 @@ use std::collections::HashMap;
 // rush-ui. Each is the one module, not a copy. (The base's changes,
 // finish, jobprocs and turnwants are named in full: this crate has its own.)
 use rush_ui_base::{
-    accounts, agentry, clanker, frame, header, imagerefs, keybind, list, look, mention, model,
-    overlay, rooms, sess, session, shells, sidecol, spawns, split, startdir, style, worker,
+    accounts, agentry, clanker, frame, header, imagerefs, keybind, list, look, model, overlay,
+    sess, session, shells, sidecol, spawns, split, startdir, style, worker,
 };
 
 // Every test runs in a throwaway home (rush-testenv).

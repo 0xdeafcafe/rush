@@ -8,12 +8,10 @@ use rush_core::adapter::FileRewind;
 use rush_core::event::{Approval, ApprovalOption, Ask, Choice, Event, OptionKind, Question};
 use rush_core::text::{Color, Line, Mods};
 use rush_core::tool::{Call, Input, Kind, Replace};
-use rush_room::room::{Member, Room, Summary};
 
 use super::asksheets::ExportSheet;
 use super::btw::{Qa, Thread, thread_lines};
 use super::compact::{CompactSheet, Summ};
-use super::discuss::{Verdicts, chat_room_rows, verdict_rows};
 use super::enter::EnterSheet;
 use super::fork::{ForkSheet, ForkTurn};
 use super::mention::mention_rows;
@@ -355,39 +353,6 @@ fn draw_all(sw: usize, h: usize, sheet: &dyn Fn(usize) -> usize, dw: usize, pw: 
             1,
         );
         put("message", sw, &ms.body(&m, w, h), w);
-
-        let v = m.kept::<Verdicts>();
-        v.waiting.insert(
-            "k".into(),
-            Summary {
-                room: Room {
-                    topic: "which cache to use".into(),
-                    ..Room::default()
-                },
-                final_: "alpha: use redis\nbeta: use memcached for now".into(),
-                ..Summary::default()
-            },
-        );
-        let mut last = HashMap::new();
-        last.insert("alpha".to_string(), "redis is simplest".to_string());
-        let member = |n: &str| Member {
-            name: n.into(),
-            ..Member::default()
-        };
-        v.rooms = vec![Summary {
-            room: Room {
-                id: "r1".into(),
-                from: "k".into(),
-                topic: "which cache".into(),
-                members: vec![member("alpha"), member("beta")],
-                ..Room::default()
-            },
-            round: 2,
-            last,
-            ..Summary::default()
-        }];
-        put("verdict", sw, &verdict_rows(&m, "k", dw), dw);
-        put("chatroom", sw, &chat_room_rows(&m, "k", dw), dw);
 
         let mut t = Thread {
             focused: true,

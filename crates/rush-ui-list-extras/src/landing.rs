@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 
+use rush_core::adapter::Profile;
 use rush_core::agent::Agent;
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -20,7 +21,6 @@ use rush_fleet::{Folder, Predicates, check_folder, folder_wants};
 use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::style::*;
-use rush_ui_social::broadcast::ModelBroadcast;
 
 // What's left before an agent's work lands is the frame's (crate::landing).
 pub use rush_ui_base::landing::{
@@ -83,8 +83,52 @@ pub fn land(m: &mut Model, i: Option<usize>) {
     } else {
         // replyTo: you see it go, then its answer.
         m.flash(&format!("sending to {name}…"));
-        m.reply_to(&a, &land_text(&l));
+        reply_outside(m, &a, &land_text(&l));
     }
+}
+
+/// Sends text to an agent rush doesn't run, through its adapter, off the
+/// UI thread (reply, replyOutside).
+fn reply_outside(m: &mut Model, a: &Agent, text: &str) {
+    let reg = m.reg.clone();
+    let (kind, account, id, name) = (
+        a.kind.to_string(),
+        a.job.account.clone(),
+        a.job.id.clone(),
+        a.display_name.clone(),
+    );
+    let text = text.to_string();
+    m.later(
+        move || {
+            let Some(ad) = reg.get(&kind) else {
+                return Err(format!("{kind} isn't known to this rush"));
+            };
+            let Some(r) = ad.replier() else {
+                return Err(format!(
+                    "{} takes no messages from outside it",
+                    reg.harness_label(&kind)
+                ));
+            };
+            let profiles = ad.profiles();
+            let p = profiles
+                .iter()
+                .find(|p| p.name == account || p.dir == account)
+                .or(profiles.first())
+                .cloned()
+                .unwrap_or_else(|| Profile {
+                    kind: kind.as_str().into(),
+                    ..Profile::default()
+                });
+            r.reply(&p, &id, &text).map_err(|e| e.to_string())
+        },
+        move |m, res| {
+            match res {
+                Ok(()) => m.flash(&format!("sent to {name}")),
+                Err(e) => m.fail(&format!("couldn't send to {name}: {e}")),
+            }
+            Out::Draw
+        },
+    );
 }
 
 /// alt+p in the list (keys.go:470).

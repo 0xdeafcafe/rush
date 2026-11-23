@@ -1775,7 +1775,6 @@ dependencies = [
  "rush-core",
  "rush-events",
  "rush-state",
- "rush-sys",
  "rush-testenv",
  "serde",
  "serde_json",
@@ -1960,7 +1959,6 @@ dependencies = [
  "rush-ui-projects-machine",
  "rush-ui-session-cards",
  "rush-ui-settings",
- "rush-ui-social",
  "serde_json",
 ]
 
@@ -2064,7 +2062,6 @@ dependencies = [
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
  "rush-ui-settings",
- "rush-ui-social",
  "serde_json",
  "tempfile",
 ]
@@ -2139,7 +2136,6 @@ dependencies = [
  "regex",
  "rush-bundled",
  "rush-claude",
- "rush-convo",
  "rush-core",
  "rush-draw",
  "rush-efficiency",

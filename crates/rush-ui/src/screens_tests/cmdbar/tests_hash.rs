@@ -609,29 +609,6 @@ fn ctrl_b_keeps_going() {
     }
 }
 
-/// #intervene from the list: with no chat open it says how; @agent goes
-/// into that agent's chat (keys.go:941-955, discuss.go:56 interveneOn).
-#[test]
-fn intervene_from_the_list() {
-    let mut m = list();
-    m.command("#intervene");
-    assert_eq!(
-        flash(&m),
-        "#intervene works in a chat, or tag one: #intervene @agent"
-    );
-    m.command("#intervene @nobody-here it loops");
-    assert_eq!(flash(&m), "no agent called @nobody-here");
-    // Its handle is its title; the animal handle it had before names it
-    // still.
-    let tag = rush_room::handle::legacy_name("c2");
-    m.command(&format!("#intervene @{tag} it loops"));
-    assert_eq!(
-        m.session.as_ref().map(|v| v.key.as_str()),
-        Some("work/c2"),
-        "the tagged agent's chat opens"
-    );
-}
-
 /// #compact with an agent picked but no session open says to open one
 /// (compactsheet.go:41).
 #[test]
@@ -644,8 +621,7 @@ fn compact_wants_an_open_session() {
     );
 }
 
-/// #view's choices mark the layout in use; #broadcast's offer every
-/// agent's @name (fleetslash.go:104 fleetArgs).
+/// #view's choices mark the layout in use (fleetslash.go:104 fleetArgs).
 #[test]
 fn hash_args_from_the_model() {
     let m = list();
@@ -662,15 +638,6 @@ fn hash_args_from_the_model() {
             ("view split".to_string(), String::new()),
             ("view agent".to_string(), String::new()),
             ("view list".to_string(), "now".to_string()),
-        ]
-    );
-    let names: Vec<String> = got("#broadcast ").into_iter().map(|c| c.0).collect();
-    assert_eq!(
-        names,
-        [
-            "broadcast all".to_string(),
-            "broadcast @tidy-the-parser".to_string(),
-            "broadcast @fix-the-build".to_string(),
         ]
     );
 }

@@ -12,7 +12,7 @@ rush-fleet.workspace = true
 rush-draw.workspace = true
 # The frame, the model, the list and their workers, under every screen.
 rush-ui-base.workspace = true
-# The social group's screens (feed, rooms, broadcasts, updates).
+# The social group's screens (feed, updates).
 rush-ui-social.workspace = true
 # Settings and Harnesses, the screens under rush-ui.
 rush-ui-settings.workspace = true

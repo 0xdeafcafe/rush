@@ -12,8 +12,8 @@
 //! last above the box, scrolling with a conversation as Go's panels do.
 //!
 //! Not here yet: the subagents and jobs on the box or in the column beside a
-//! wide conversation (side.rs has its tasks and changes), a room's
-//! verdict, images drawn as chips in queued messages and the stash's keys.
+//! wide conversation (side.rs has its tasks and changes), images drawn
+//! as chips in queued messages and the stash's keys.
 
 use std::time::{Duration, Instant};
 
@@ -246,17 +246,11 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         // The spinner turns, and a message waited on too long goes.
         m.ask_wake(Instant::now() + Duration::from_secs(1));
     }
-    // The queue and a waiting card sit last, just above the box; a room
-    // running on the chat before them (paneDock :3513).
+    // The queue and a waiting card sit last, just above the box.
     // The views beside the conversation take their room of its width; the
     // card stays inside what's left, so they never lie over its words.
     let vw = rush_ui_plugin_ui::views::beside::views_beside(m, &key, w).2;
-    let (room_rows, card_rows) =
-        rush_ui_session_cards::dock_parts(m, w.saturating_sub(vw + 1).max(20));
-    if !room_rows.is_empty() {
-        block(&mut out, &mut blocks);
-        out.extend(room_rows);
-    }
+    let card_rows = rush_ui_session_cards::dock_card_rows(m, w.saturating_sub(vw + 1).max(20));
     let picked = m
         .session
         .as_ref()
@@ -572,7 +566,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         .then(|| super::memedit::picked_path(m, key))
         .flatten();
     // A room's pane is its row's, as Go's room rows are agents.
-    let a = crate::rooms::row_agent(m, key).cloned();
+    let a = crate::sess::agent(m, key).cloned();
     let paused = a
         .as_ref()
         .is_some_and(|a| rush_ui_cmdbar::stops::hibernated(m, &a.key));
@@ -658,13 +652,8 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 );
             }
         } else {
-            // Go says Claude Code whatever the agent (rushmode.go:3684); a
-            // room has no harness of its own, so it keeps Go's words.
-            let harness = if crate::rooms::is_room_key(&a.key) {
-                "Claude Code".to_string()
-            } else {
-                harness_name(&m.reg, &a.kind)
-            };
+            // Go says Claude Code whatever the agent (rushmode.go:3684).
+            let harness = harness_name(&m.reg, &a.kind);
             add(
                 &mut top,
                 line([sp(format!("enter replies through {harness}"), DIM)]),
@@ -1150,8 +1139,8 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         working: live || !c.hosted() && a.as_ref().is_some_and(busy),
         typed: !c.input.is_empty(),
         queued: !q.items.is_empty(),
-        picked: picked_mode,
         mode: sendmode::mode_of(picked_mode, &modes),
+        ways: modes.len() > 1,
         cleared: c.cleared_at > 0 && now - c.cleared_at < 120_000,
     };
     // The key that sends now is yours if you moved it (sendmode.go:110-116).

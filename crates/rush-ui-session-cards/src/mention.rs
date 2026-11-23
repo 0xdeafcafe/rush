@@ -19,9 +19,7 @@ use crate::model::Model;
 use crate::style::*;
 
 // An agent's handle, and what tags it, are the frame's (crate::mention).
-pub use rush_ui_base::mention::{
-    ROOM_KEY_PREFIX, handle_tint, keep, mention_name, mentionable, tags,
-};
+pub use rush_ui_base::mention::{handle_tint, keep, mention_name, mentionable, tags};
 
 /// The list's agents in its order, each with its host's id when rush
 /// runs it.

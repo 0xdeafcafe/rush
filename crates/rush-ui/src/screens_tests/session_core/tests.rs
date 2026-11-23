@@ -55,7 +55,7 @@ impl Adapter for Steer {
     }
 }
 
-/// One that can't: only queue and discuss (and pick a conversation up
+/// One that can't: only queue (and pick a conversation up
 /// again, as moving one to rush mode needs).
 struct Plain;
 
@@ -202,18 +202,18 @@ pub(super) fn screen(m: &mut Model) -> Vec<String> {
 
 // ---- sendmode.go, sendmode_test.go ----
 
-/// ctrl+t goes round queue, guide, stop & send and discuss, each session
+/// ctrl+t goes round queue, guide and stop & send, each session
 /// keeping its own, and the box's border says what enter does
 /// (TestSendModeCycles).
 #[test]
 fn send_mode_cycles() {
     let (mut m, _) = hosted("steer", Vec::new());
     let mut saw = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..3 {
         press(&mut m, "ctrl+t");
         saw.push(super::keys::mode_of(&mut m, KEY).name());
     }
-    assert_eq!(saw.join(","), "guide,stop & send,discuss,queue");
+    assert_eq!(saw.join(","), "guide,stop & send,queue");
     press(&mut m, "ctrl+t");
     assert_eq!(
         flash(&m),
@@ -233,17 +233,9 @@ fn send_mode_cycles() {
 #[test]
 fn send_modes_follow_what_the_agent_can() {
     let reg = registry();
-    let all = [
-        SendMode::Queue,
-        SendMode::Guide,
-        SendMode::Stop,
-        SendMode::Discuss,
-    ];
+    let all = [SendMode::Queue, SendMode::Guide, SendMode::Stop];
     assert_eq!(sendmode::modes(&reg, "steer"), all);
-    assert_eq!(
-        sendmode::modes(&reg, "plain"),
-        [SendMode::Queue, SendMode::Discuss]
-    );
+    assert_eq!(sendmode::modes(&reg, "plain"), [SendMode::Queue]);
     let few = sendmode::modes(&reg, "plain");
     // A pick the agent can't do is queue.
     assert_eq!(
@@ -252,16 +244,13 @@ fn send_modes_follow_what_the_agent_can() {
     );
     assert_eq!(
         sendmode::next_mode(Some(SendMode::Guide), &few),
-        SendMode::Discuss
-    );
-    assert_eq!(sendmode::next_mode(None, &few), SendMode::Discuss);
-    assert_eq!(
-        sendmode::next_mode(Some(SendMode::Discuss), &few),
         SendMode::Queue
     );
+    assert_eq!(sendmode::next_mode(None, &few), SendMode::Queue);
+    assert_eq!(sendmode::next_mode(None, &all), SendMode::Guide);
     assert_eq!(
-        sendmode::cycled(SendMode::Discuss),
-        "enter opens a room on what's typed: its verdict comes back here"
+        sendmode::next_mode(Some(SendMode::Stop), &all),
+        SendMode::Queue
     );
     assert_eq!(
         sendmode::cycled(SendMode::Stop),
@@ -272,28 +261,28 @@ fn send_modes_follow_what_the_agent_can() {
 /// boxKeys: what the hint row offers, state by state.
 #[test]
 fn box_keys_table() {
-    let st = |live, working, typed, queued, picked, mode, cleared| BoxState {
+    let st = |live, working, typed, queued, ways, mode, cleared| BoxState {
         live,
         working,
         typed,
         queued,
-        picked,
         mode,
+        ways,
         cleared,
     };
     use SendMode::*;
     let cases: &[(BoxState, &[(&str, &str)])] = &[
-        (st(false, false, false, false, None, Queue, false), &[]),
+        (st(false, false, false, false, true, Queue, false), &[]),
         (
-            st(false, false, true, false, None, Queue, false),
+            st(false, false, true, false, true, Queue, false),
             &[("enter", "send")],
         ),
         (
-            st(false, false, false, true, None, Queue, false),
+            st(false, false, false, true, true, Queue, false),
             &[("ctrl+enter", "send the queue now")],
         ),
         (
-            st(false, true, true, false, None, Queue, false),
+            st(false, true, true, false, true, Queue, false),
             &[
                 ("enter", "queue it"),
                 ("ctrl+enter", "send now"),
@@ -301,7 +290,7 @@ fn box_keys_table() {
             ],
         ),
         (
-            st(true, true, true, false, Some(Guide), Guide, false),
+            st(true, true, true, false, true, Guide, false),
             &[
                 ("enter", "guide it"),
                 ("ctrl+enter", "send now"),
@@ -310,7 +299,7 @@ fn box_keys_table() {
             ],
         ),
         (
-            st(true, true, true, false, Some(Stop), Stop, false),
+            st(true, true, true, false, true, Stop, false),
             &[
                 ("enter", "stop & send"),
                 ("ctrl+enter", "send now"),
@@ -318,16 +307,17 @@ fn box_keys_table() {
                 ("ctrl+x", "stop it"),
             ],
         ),
+        // An agent that only queues: no ctrl+t to say.
         (
-            st(true, true, true, false, Some(Discuss), Discuss, false),
+            st(true, true, true, false, false, Queue, false),
             &[
-                ("enter", "discuss it in a room"),
-                ("ctrl+t", "what enter does while it works"),
+                ("enter", "queue it"),
+                ("ctrl+enter", "send now"),
                 ("ctrl+x", "stop it"),
             ],
         ),
         (
-            st(false, false, false, false, None, Queue, true),
+            st(false, false, false, false, true, Queue, true),
             &[("cmd+z or ctrl+/", "bring back what you cleared")],
         ),
     ];
@@ -381,20 +371,6 @@ fn the_ways_enter_sends() {
         assert_eq!(fake.ops(), std::slice::from_ref(want), "case {i}");
         assert_eq!(input(&mut m), "", "case {i}");
     }
-    // Discuss: enter doesn't send; it opens a room on what's typed
-    // (discussTyped).
-    m.cards().host = Some(super::cards_host::host());
-    press(&mut m, "ctrl+t");
-    fake.ops.lock().unwrap().clear();
-    typed(&mut m, "one");
-    press(&mut m, "enter");
-    assert!(fake.ops().is_empty());
-    assert_eq!(input(&mut m), "");
-    let s = m
-        .sheet_as::<rush_ui_social::roomsetup::RoomSetup>()
-        .expect("the room's set-up");
-    assert_eq!(s.from, KEY);
-    assert!(s.fill);
     // An empty box: enter does nothing.
     let (mut m, fake) = hosted("steer", Vec::new());
     press(&mut m, "enter");

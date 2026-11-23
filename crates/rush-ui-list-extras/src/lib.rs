@@ -27,7 +27,7 @@
 // names.)
 use rush_ui_base::{
     accounts, attached, barfind, config, frame, host, imagerefs, jobprocs, list, look, model,
-    overlay, paint, rooms, search, sess, session, shells, startdir, style, turnwants, worker,
+    overlay, paint, search, sess, session, shells, startdir, style, turnwants, worker,
 };
 
 // Every test runs in a throwaway home (rush-testenv).
@@ -180,18 +180,8 @@ pub fn neighbour(m: &Model, key: &str) -> String {
                 }
                 rows.clear();
             }
-            ListLine::Agent(i) | ListLine::Member { i, .. } => {
+            ListLine::Agent(i) => {
                 let k = m.agents[*i].key.as_str();
-                if k == key {
-                    at = Some(rows.len());
-                }
-                rows.push(k);
-            }
-            ListLine::Room { id, .. } => {
-                let k = m
-                    .rooms_grouped()
-                    .and_then(|g| g.row.get(id))
-                    .map_or("", |a| a.key.as_str());
                 if k == key {
                     at = Some(rows.len());
                 }

@@ -102,12 +102,9 @@ fn keep_view(m: &mut Model, v: &'static str) {
     });
 }
 
-/// Opens the picked agent, or room, with the keys (focusPane).
+/// Opens the picked agent, with the keys (focusPane).
 fn open_picked(m: &mut Model) {
-    let key = m.sel.clone();
-    if crate::rooms::is_room_key(&key) {
-        rush_ui_social::rooms::open_room(m, &key);
-    } else if let Some(i) = m.focused() {
+    if let Some(i) = m.focused() {
         m.open(i);
     }
 }
@@ -223,8 +220,7 @@ pub fn pointer_at(m: &mut Model, x: usize, moved: bool) -> bool {
 /// with the keys, else the list has the screen. The layout #view keeps
 /// isn't changed.
 pub fn toggle(m: &mut Model) -> Out {
-    let room = crate::rooms::is_room_key(&m.sel);
-    if !room && m.focused().is_none() {
+    if m.focused().is_none() {
         return Out::Idle;
     }
     if widths(m).0 > 0 && chat_open(m) {
@@ -477,15 +473,6 @@ struct Unreadable(String);
 /// Keeps the Session beside the list on the agent picked: read again
 /// only when the pick moves to another (loadPreview).
 pub fn follow(m: &mut Model) {
-    // A room's row: its log drawn as its agents' conversation (syncHost's
-    // syncRoom).
-    if crate::rooms::is_room_key(&m.sel) {
-        let key = m.sel.clone();
-        if m.pane.as_ref().is_none_or(|v| v.key != key) {
-            m.pane = rush_ui_social::rooms::room_view(m, &key);
-        }
-        return;
-    }
     let Some(i) = m.focused() else {
         m.pane = None;
         return;

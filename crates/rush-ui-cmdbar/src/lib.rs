@@ -35,8 +35,8 @@ use rush_draw::{Button, MouseKind};
 // search are named in full: the keymap's lookups are the base's, and this
 // crate has a keybind of its own.)
 use rush_ui_base::{
-    accounts, attached, away, barfind, config, frame, host, list, look, model, overlay, rooms,
-    sess, session, split, startdir, style, worker,
+    accounts, attached, away, barfind, config, frame, host, list, look, model, overlay, sess,
+    session, split, startdir, style, worker,
 };
 
 // Every test runs in a throwaway home (rush-testenv).

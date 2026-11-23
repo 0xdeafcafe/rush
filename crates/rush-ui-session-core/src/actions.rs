@@ -160,10 +160,6 @@ pub fn carry_key(m: &mut Model, k: &crate::frame::Press) -> Out {
         }
         _ => return Out::Pass,
     };
-    if to.starts_with(crate::mention::ROOM_KEY_PREFIX) {
-        m.flash_err("a room's box takes no draft: pick a session");
-        return Out::Draw;
-    }
     let text = std::mem::take(&mut m.input.text);
     let pastes = std::mem::take(&mut m.input.pastes);
     m.input.clear();

@@ -70,13 +70,13 @@ speed or memory claim has a number behind it.
 | `rush-host`   | the host: the process a rush-mode session lives in (`rush host run <id>`), its socket protocol, the UI's client to it, its per-agent watching (sleep, away, stalls, hung shells, long tasks, answers spawned agents owe), spawn_agent's agents, and rush's own tools served to each session (agtools.rs: in process, or `rush mcp-tools` over stdio); `rush spawn` (a headless session standing in for claude -p or codex exec) is the binary's | `internal/host`, cmd/rush's host commands |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
 | `rush-ui-base` | what every screen builds on: the model, the frame (places, routing, sheets, editing, the `Ext` hooks and slots the screens fill; "Screens"), the agent list, config, the workers, and the data the screens share (a session's connection as every screen reads it, `sess::ConnCore`; the hosts; the accounts' state and rush's store; the keymap in force; where new sessions start) | `internal/ui` |
-| `rush-ui-social` | the social group's screens: the feed and its graph, rooms, broadcasts, updates and reloading; depends on rush-ui-base only (what it asks of other screens goes through `Ext::calls` and `Act`); its tests that need the whole UI are rush-ui's `screens_tests/social` | `internal/ui` |
+| `rush-ui-social` | the social group's screens: the feed and its graph, updates and reloading; depends on rush-ui-base only (what it asks of other screens goes through `Ext::calls` and `Act`); its tests that need the whole UI are rush-ui's `screens_tests/social` | `internal/ui` |
 | `rush-ui`     | the screens under `screens/`, registered into a model (`new_model`); the entry points (`run`, `render`, `soak`); re-exports rush-ui-base's modules at their old paths | `internal/ui`                              |
 | `rush-ui-projects-machine` | the Projects place and the machine: projects, worktrees, folders, processes, clean-up, memory review and the machine's own care; depends on rush-ui-base only (slots and `Act` for the rest); its tests that need the whole UI are rush-ui's `screens_tests/projects_machine` | `internal/ui/projects*.go`, `machinecare.go`, `cleanup.go` |
 | `rush-ui-settings` | the Harnesses and Settings places: every settings page, the form they share and the sheets opened from them; reaches no other screen (slots and `Act` in rush-ui-base). New in the port on Settings › Updates: while a look runs every row says "checking…" (rush's keeping the newest version known), the Harnesses section says "checked 4m ago" after it; a view started on a newer rush than the last one ran (rush-state `ranversion.json`) says once as news "rush updated to v…: what's new in Settings › Updates", and the rush row (enter when there's nothing to install, n always) opens What's new, its releases' notes since the rush before, drawn as HelpSheet draws a setting's whole explanation | `internal/ui/settings*.go` |
 | `rush-ui-plugin-ui` | the plugin screens: plugin sheets, approvals, picks, the layout question, an agent's views beside its conversation, artifacts and the file editor; depends on rush-ui-base only (what it asks of session_core goes through `Ext::calls`, `Act` and its `PanelHost`, which session_core fills); its tests that need the whole UI are rush-ui's `screens_tests/plugin_ui` | `internal/ui` |
 | `rush-ui-accounts` | the account screens: each provider's look, accounts and their limits, what the next session starts as (#use, the New session and Start sheets), signing in, Getting started, #ask, the info sheet's tabs; depends on rush-ui-base and, by rank (settings < accounts, debt), rush-ui-settings; what it asks of other screens goes through `Ext::calls` and `Act`; its tests are rush-ui's `screens_tests/accounts` | `internal/ui` |
-| `rush-ui-session-cards` | the cards and sheets on a session: approvals, Claude's questions, limit and sign-in cards, /rewind, /fork, /compact, #slim, the message sheet, the quick ask, /btw, rooms on a session, handing over, pastes and pictures; depends on rush-ui-base and, by rank, plugin_ui, settings, accounts, projects_machine and social; reaches session_core only through `Ext::calls`, `Act` and its HOST fn table (`link`); its tests are rush-ui's `screens_tests/session_cards` | `internal/ui` |
+| `rush-ui-session-cards` | the cards and sheets on a session: approvals, Claude's questions, limit and sign-in cards, /rewind, /fork, /compact, #slim, the message sheet, the quick ask, /btw, handing over, pastes and pictures; depends on rush-ui-base and, by rank, plugin_ui, settings, accounts, projects_machine and social; reaches session_core only through `Ext::calls`, `Act` and its HOST fn table (`link`); its tests are rush-ui's `screens_tests/session_cards` | `internal/ui` |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
@@ -869,7 +869,7 @@ otherwise share the default class with every compiler an agent starts,
 and with ten builds going a frame waited 250 ms to 3 s for CPU
 (stalls.log, load 160 on 10 cores). A program takes on the class of the
 thread that starts it, so what rush starts to keep running (hosts, the
-plugin broker, reminders, ollama, rooms, prdrive, pushlater, the sshd
+plugin broker, reminders, ollama, prdrive, pushlater, the sshd
 shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
 
 4. **netwatch** (rush-net): whether the API can be reached. It checks
@@ -3172,8 +3172,8 @@ their edits.
 
 The box's edge says what enter does, not a name for it: "enter queues
 it for when it's done", "enter guides it at its next step", "enter
-stops it and sends", "enter opens a room on it", then "ctrl+t to
-guide" (the next way). Go's edge said "queuing · ctrl+t coalesce":
+stops it and sends", then "ctrl+t to guide" (the next way; not said
+of an agent that only queues). Go's edge said "queuing · ctrl+t coalesce":
 "coalesce" was the host's word for batching what's typed into the turn
 under way, and nobody knew what it meant. The task row on the box no
 longer has "all tasks ›" at its right, over the edge's words; it ends
@@ -3379,10 +3379,7 @@ is made. Everything below is in `rush_ui::frame`.
   go and dialled again, its message put back in the box. The host's
   count of the context (`Said::Context`) is kept on the session's
   `Conn`, with what it never used worked out once per count, not per
-  frame. A room set up from a chat (#discuss, #intervene) opens the
-  room screens' set-up sheet (`social::roomsetup`, as #room does): its
-  members' configs and the room kept and started are `Hosts` calls
-  (`room_member`, `open_room`) off the UI thread. Renaming from enter's
+  frame. Renaming from enter's
   first answer is the list's `list_extras::rename::start_rename` (ctrl+r,
   #rename, and enter once you chose it renames). #compact's model list
   has Ollama's decision models to prune with (`Hosts::decision_models`,
@@ -4872,7 +4869,7 @@ messages and rush's notices (`inbox.rs` `TELL_NOTE`, `NOTICE_NOTE`: a
 view clicked, views gone stale, a stuck command stopped, the gate
 stopping or pausing a run), reminders (their id and times), the away
 check-in, long background tasks, a child agent's answer, revive, retry
-and limit messages, pull request news, room turns, rush's own tools'
+and limit messages, pull request news, rush's own tools'
 results (show, view, spawn_agent, agent_result, remind, contact_sheet), the gate's
 waiting line in a command's output, and the hooks' refusals (runaway
 guard, search guard, watch, context guard), squeezed output, and the
@@ -5732,6 +5729,14 @@ log when it went.
   a child asks is the user's to answer again, on its card in the parent's
   session or in its own; the caller's wait says it waits on the user, as
   Go's did (docs/subagents.md).
+- 2026-11-23: rooms and broadcasts: `#room`, `#discuss` (ctrl+] t),
+  `#intervene` and `#broadcast`, the discuss way of sending (ctrl+t now
+  goes round queue, guide and stop & send), room rows in the list, the
+  room panel and verdict card on a session, `rush room` and
+  `docs/room.md`; `rush-room`'s `room`, `driver`, `seen` and `doing`
+  modules. `rush-room` keeps the feed (`rush feed`, `community`) and
+  the @handles. A room's members saved before show as ordinary
+  sessions; the `rooms` folder in rush's home is no longer read.
 
 ## Milestones (full plan: PLAN.md)
 

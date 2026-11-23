@@ -277,7 +277,7 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
         return Vec::new();
     };
     let mut out: Vec<(Line, String)> = vec![(Line::new(), String::new())];
-    if let Some(a) = crate::rooms::row_agent(m, key) {
+    if let Some(a) = crate::sess::agent(m, key) {
         out.push((
             fit(
                 line([

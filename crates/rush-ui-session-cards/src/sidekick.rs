@@ -12,11 +12,12 @@
 
 use std::collections::HashMap;
 
-use rush_convo::Session;
+use rush_convo::{Item, Session, Turn};
 use rush_core::text::Line;
 use rush_core::time::Ms;
 
 use super::quickask::ask_cheap;
+use super::util::cut_runes;
 use crate::frame::Out;
 use crate::model::Model;
 use crate::style::*;
@@ -100,7 +101,31 @@ pub fn parse_side(out: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
 /// The latest exchanges of a chat, as the model reads them (sideInput).
 pub fn side_input(s: &Session) -> String {
     let from = s.turns.len().saturating_sub(SIDE_TURNS);
-    super::discuss::chat_turns_of(&s.turns[from..], s, false).join("\n")
+    chat_turns(&s.turns[from..]).join("\n")
+}
+
+/// A chat's exchanges, oldest first: what was asked and what the agent
+/// said, each cut to a few KB (chatTurns, without a reviewer's steps).
+fn chat_turns(turns: &[Turn]) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in turns {
+        let mut b = String::new();
+        let p = t.prompt.trim();
+        if !p.is_empty() {
+            b.push_str(&format!("User: {p}\n"));
+        }
+        for it in &t.items {
+            if let Item::Text { text, .. } = it
+                && !text.trim().is_empty()
+            {
+                b.push_str(&format!("Agent: {}\n", text.trim()));
+            }
+        }
+        if !b.is_empty() {
+            out.push(cut_runes(&b, 4 << 10));
+        }
+    }
+    out
 }
 
 /// session.recall: on and off (toggleRecall).
