@@ -1,6 +1,6 @@
 {
- "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa",
- "at": "2026-11-23T16:46:23Z",
+ "commit": "5665e1f7b15da00f07afc9bdf000cf4af85278af",
+ "at": "2026-11-23T18:12:26Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -718,6 +718,6 @@
   "render 3000 turns w120: cold frame at the end, bytes",
   "render 3000 turns w120: cold jump to the top (window), bytes",
   "render 3000 turns w120: normal: cold frame at the end, bytes",
-  "ui: footprint"
+  "ui: threads"
  ]
 }
