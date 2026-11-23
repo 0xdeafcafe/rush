@@ -390,9 +390,13 @@ fn push_to_talk_expects_the_words_on_screen() {
             "Anthropic",
             "Claude Code",
             "Claude",
+            "Opus 5.5",
             "Opus",
+            "Sonnet 5.5",
             "Sonnet",
+            "Haiku 5.5",
             "Haiku",
+            "Fable 5.2",
             "Fable",
         ]
     );

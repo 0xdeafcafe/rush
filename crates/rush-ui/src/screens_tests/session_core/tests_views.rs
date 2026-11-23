@@ -1581,11 +1581,9 @@ fn the_column_beside_a_wide_conversation() {
     assert_eq!(x, 2 + 139, "{:?}", s[y]);
     assert!(s[y + 1].contains("✓ Read the parser"));
     assert!(s[y + 2].contains("■ Fixing the bug"));
-    assert!(
-        s[y + 3].contains("☐ Run the tests  all tasks ›"),
-        "{:?}",
-        s[y + 3]
-    );
+    // The column's own head opens Tasks: "all tasks ›" is the box's list's.
+    assert!(s[y + 3].contains("☐ Run the tests"), "{:?}", s[y + 3]);
+    assert!(!s[y + 3].contains("all tasks ›"), "{:?}", s[y + 3]);
     let c = row_with(&mut m, "▌ Changes  +1 −1").expect("the changes");
     assert_eq!(c, y + 5, "a row apart");
     assert!(s[c + 1].contains("/src/checkout/src/parse.rs"));
@@ -2029,10 +2027,12 @@ fn needs_you_under_the_last_answer() {
         "your message box has a draft · send or clear it first"
     );
     assert!(needs_sent(&fake).is_empty(), "{:?}", needs_sent(&fake));
-    // ↑ from the empty box picks the row for your own words; a reply's
-    // number puts it in the box to change first, the box has the keys
-    // again.
+    // ↑ from the empty box lands on the task row's head, and again picks
+    // the row for your own words; a reply's number puts it in the box to
+    // change first, the box has the keys again.
     conn(&mut m, KEY).input.clear();
+    press(&mut m, "up");
+    assert_eq!(m.session.as_ref().unwrap().sel, "tasks");
     press(&mut m, "up");
     let own = rush_convo::render::needs_ref(rush_convo::render::NEEDS_OWN, "");
     assert_eq!(m.session.as_ref().unwrap().sel, own);
@@ -2047,6 +2047,7 @@ fn needs_you_under_the_last_answer() {
     assert_eq!(input(&mut m), "not yet1");
     // Enter on the row for your own words gives the box the keys.
     conn(&mut m, KEY).input.clear();
+    press(&mut m, "up");
     press(&mut m, "up");
     press(&mut m, "enter");
     assert_eq!(m.session.as_ref().unwrap().sel, "");
