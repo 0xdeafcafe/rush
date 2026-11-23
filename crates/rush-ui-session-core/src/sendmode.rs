@@ -151,7 +151,10 @@ pub fn box_keys(b: &BoxState) -> Vec<(&'static str, &'static str)> {
         pairs.push((SEND_NOW, "send the queue now"));
     }
     if b.live {
-        pairs.push((SEND_MODE, "queue · guide · stop · discuss"));
+        // Not Go's "queue · guide · stop · discuss", four names with
+        // nothing to say which is on or what the key does to them: the
+        // box's edge says what enter does now and what ctrl+t makes it.
+        pairs.push((SEND_MODE, "what enter does while it works"));
     }
     if b.working {
         pairs.push((STOP, "stop it"));

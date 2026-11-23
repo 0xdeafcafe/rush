@@ -305,7 +305,7 @@ fn box_keys_table() {
             &[
                 ("enter", "guide it"),
                 ("ctrl+enter", "send now"),
-                ("ctrl+t", "queue · guide · stop · discuss"),
+                ("ctrl+t", "what enter does while it works"),
                 ("ctrl+x", "stop it"),
             ],
         ),
@@ -314,7 +314,7 @@ fn box_keys_table() {
             &[
                 ("enter", "stop & send"),
                 ("ctrl+enter", "send now"),
-                ("ctrl+t", "queue · guide · stop · discuss"),
+                ("ctrl+t", "what enter does while it works"),
                 ("ctrl+x", "stop it"),
             ],
         ),
@@ -322,7 +322,7 @@ fn box_keys_table() {
             st(true, true, true, false, Some(Discuss), Discuss, false),
             &[
                 ("enter", "discuss it in a room"),
-                ("ctrl+t", "queue · guide · stop · discuss"),
+                ("ctrl+t", "what enter does while it works"),
                 ("ctrl+x", "stop it"),
             ],
         ),
@@ -1559,7 +1559,7 @@ fn dock_frame_while_it_works() {
     assert!(f[n - 3].contains("❯ more"), "{f:?}");
     assert_eq!(
         f[n - 1].trim_end(),
-        "    enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  f1 more  ·  esc back"
+        "    enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc back"
     );
 }
 
@@ -1625,12 +1625,12 @@ fn dock_keys_at_go_widths() {
         (
             "typed-live",
             100,
-            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  esc back",
+            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  esc back",
         ),
         (
             "typed-live",
             120,
-            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t queue · guide · stop · discuss  ·  f1 more  ·  esc back",
+            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc back",
         ),
         (
             "queue-picked",
@@ -1650,17 +1650,17 @@ fn dock_keys_at_go_widths() {
         (
             "working",
             80,
-            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  esc back",
         ),
         (
             "working",
             100,
-            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  ↑ rewind  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  ↑ rewind  ·  esc back",
         ),
         (
             "working",
             120,
-            "ctrl+t queue · guide · stop · discuss  ·  ctrl+x stop it  ·  ↑ rewind  ·  f1 more  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  ↑ rewind  ·  f1 more  ·  esc back",
         ),
     ];
     for (st, w, keys) in want {

@@ -420,7 +420,7 @@ pub fn went_to(did: &str, tab: &str, on: bool, history: &str) -> String {
     if !on {
         return did.to_string();
     }
-    format!("{did} · {history} › {tab} has it")
+    format!("{did} · {history} lists what you've {}", tab.to_lowercase())
 }
 
 #[cfg(test)]
@@ -580,7 +580,7 @@ mod tests {
         );
         assert_eq!(
             went_to("cleared", "Cleared", true, "#stash"),
-            "cleared · #stash › Cleared has it"
+            "cleared · #stash lists what you've cleared"
         );
         assert_eq!(went_to("cleared", "Cleared", false, "#stash"), "cleared");
     }

@@ -3181,6 +3181,15 @@ the last row of the open list ("+12 more · all tasks ›"), a click on
 any of whose rows opens Tasks as before, and all of the head opens and
 shuts it.
 
+The task row's head takes the cursor (`keys::tasks_nav`, `TASKS_REF`):
+↑ from the box lands on it, enter and space shut and open the list, ←
+shuts it, → opens it and then the Tasks view, ↓ and esc are back in the
+box, ↑ goes on up to the queue, the dock and the conversation. The
+hints under the box say ctrl+t changes "what enter does while it
+works" (Go named the four ways), and a message sent or a box cleared
+flashes "sent · ctrl+r lists what you've sent" (Go: "ctrl+r › Sent has
+it").
+
 ### The list's columns, some turned off (Rust-only)
 
 `Model::col_widths` hid each column under a width worked out for all six

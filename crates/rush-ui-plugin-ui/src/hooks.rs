@@ -703,7 +703,10 @@ pub fn went_to(m: &Model, did: &str, tab: &str) -> String {
     }
     format!(
         "{did}{}",
-        stash_said(m, &format!(" · {{history}} › {tab} has it"))
+        stash_said(
+            m,
+            &format!(" · {{history}} lists what you've {}", tab.to_lowercase())
+        )
     )
 }
 

@@ -188,12 +188,12 @@ fn sent_and_cleared_say_where_they_went() {
     );
     typed(&mut m, "two");
     press(&mut m, "enter");
-    assert_eq!(flash(&m), "sent · ctrl+r › Sent has it");
+    assert_eq!(flash(&m), "sent · ctrl+r lists what you've sent");
     typed(&mut m, "three");
     press(&mut m, "esc");
     assert_eq!(
         flash(&m),
-        "cleared · cmd+z or ctrl+/ brings it back · ctrl+r › Cleared has it"
+        "cleared · cmd+z or ctrl+/ brings it back · ctrl+r lists what you've cleared"
     );
     with(
         &mut m,
@@ -207,7 +207,7 @@ fn sent_and_cleared_say_where_they_went() {
     press(&mut m, "enter");
     assert_eq!(
         flash(&m),
-        "sent · your draft is back in the box · ctrl+r › Sent has it"
+        "sent · your draft is back in the box · ctrl+r lists what you've sent"
     );
     assert_eq!(fake.ops(), [send("one"), send("two"), send("four")]);
 }
@@ -346,7 +346,7 @@ fn prompt_wipe() {
     assert!(m.input.is_empty());
     assert_eq!(
         flash(&m),
-        "cleared · cmd+z or ctrl+/ brings it back · #stash › Cleared has it"
+        "cleared · cmd+z or ctrl+/ brings it back · #stash lists what you've cleared"
     );
 }
 
