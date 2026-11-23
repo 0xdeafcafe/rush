@@ -1087,7 +1087,7 @@ pub fn draw_question(
         let (a, b, c2) = if c.q_decide && c.q_own {
             ("esc", " back to the choices", "")
         } else if c.q_decide && c.q_let_go {
-            ("↑", " back to the decision", "")
+            ("↑", " back to the decision   ·   esc to the list", "")
         } else if c.q_decide {
             ("↓", " back to the decision", "")
         } else {
@@ -2028,6 +2028,14 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 c.card_focus = false;
                 c.q_let_go = true;
                 return Out::Draw;
+            }
+            // { and } go back to the list from the card as they do from
+            // the box (Rust-only: the card took them, and there was no
+            // way out to the list but answering it). The card keeps the
+            // keys for when you're back. Esc twice does the same: once
+            // lets go, and the empty box's esc is the list's.
+            if c.card_focus && !c.q_own && !c.q_full && (s == "{" || s == "}") {
+                return Out::Pass;
             }
             if !c.q_own && sel_empty && !c.card_focus && !c.q_let_go {
                 // ↑ that gives it the keys does only that, as on any card.

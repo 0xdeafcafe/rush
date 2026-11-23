@@ -3384,7 +3384,10 @@ is made. Everything below is in `rush_ui::frame`.
   first, while the box said "esc returns here"): the box is drawn again
   and has the keys, for a message as ever, the card stays, no longer
   taking every key back, and ↑ from the empty box (or a click) is back
-  on it. Something else (enter on its row, or any
+  on it. From the card, `{` and `}` go back to the list as they do
+  from the box (the card took them: there was no way out to the list
+  but answering), and so does esc twice, the let-go card's hint saying
+  so. Something else (enter on its row, or any
   character not an option's letter: `question::own_typed`) brings the
   box up as the answer's own (yellow edge, ✎, "something else · enter
   gives your answer", `dock::message_box`), and esc or ↑ from it empty

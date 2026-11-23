@@ -1229,6 +1229,11 @@ fn decisions_card_esc_lets_go() {
     );
     assert_eq!(card_key(&mut m, "k", &i, "up", true), Out::Draw);
     assert!(m.cards().conns["k"].card_focus, "↑ is back on the card");
+    // { and } are the list's from the card too, and it keeps the keys.
+    for k in ["{", "}"] {
+        assert_eq!(card_key(&mut m, "k", &i, k, true), Out::Pass, "{k}");
+        assert!(m.cards().conns["k"].card_focus, "{k}");
+    }
     assert!(acts(&mut m).is_empty());
 }
 

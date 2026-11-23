@@ -54,6 +54,10 @@ pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
     Out::Draw
 }
 
+/// Puts text in agent key's box as it is, the session's own way (the box
+/// is session_core's).
+pub type PutText = fn(&mut Model, &str, &str);
+
 /// A paste that was only a picture's name, the file not on this machine
 /// (a picture copied on another Mac, pasted here through the shared
 /// clipboard, comes to the terminal as its name): the clipboard is asked
@@ -61,15 +65,15 @@ pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
 /// it holds none. Over ssh the clipboard is the far machine's, out of
 /// reach: the name is pasted, and rush says why. Rust-only: Go pasted the
 /// name.
-pub fn paste_named(m: &mut Model, key: &str, name: String) -> Out {
+pub fn paste_named(m: &mut Model, key: &str, name: String, put: PutText) -> Out {
     let far = std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
     if far || !cfg!(target_os = "macos") || m.sender().is_none() || m.kept::<ClipState>().pasting {
-        super::conn(m, key).input.paste(&name, true);
         if far {
             m.flash(
                 "only the picture's name came through: the file is on the machine you're typing at",
             );
         }
+        put(m, key, &name);
         return Out::Draw;
     }
     m.kept::<ClipState>().pasting = true;
@@ -80,8 +84,8 @@ pub fn paste_named(m: &mut Model, key: &str, name: String) -> Out {
         match r {
             Ok(Some(p)) => act(m, &key, Act::AttachImages(vec![p])),
             _ => {
-                super::conn(m, &key).input.paste(&name, true);
                 m.flash("no picture came with that name: it's in the box as text");
+                put(m, &key, &name);
                 Out::Draw
             }
         }

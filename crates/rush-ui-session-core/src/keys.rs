@@ -1278,7 +1278,9 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
     // Only a picture's name, the picture itself on another machine: the
     // clipboard is asked for it (Rust-only).
     if crate::frame::editor::names_far_image(&text, &look_disk) {
-        return rush_ui_session_cards::clipimage::paste_named(m, &key, text);
+        return rush_ui_session_cards::clipimage::paste_named(m, &key, text, |m, key, text| {
+            conn(m, key).input.paste(text, true);
+        });
     }
     let c = conn(m, &key);
     let mut text = text;
