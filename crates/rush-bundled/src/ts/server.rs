@@ -185,16 +185,11 @@ impl Server {
             "rootUri": root_uri,
             "capabilities": {
                 "textDocument": {
-                    "hover": { "contentFormat": ["markdown", "plaintext"] },
-                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
-                    "definition": { "linkSupport": false },
-                    "implementation": { "linkSupport": false },
                     "references": {},
-                    "callHierarchy": {},
                     "publishDiagnostics": {},
                     "diagnostic": {},
                 },
-                "workspace": { "symbol": {}, "workspaceFolders": true, "configuration": true },
+                "workspace": { "workspaceFolders": true, "configuration": true },
             },
             "workspaceFolders": [{ "uri": root_uri, "name": base }],
         });

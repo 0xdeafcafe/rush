@@ -179,21 +179,22 @@ fn ts_over_a_language_server() {
     };
     // The server asked for its settings before it answered initialize,
     // and got a null for each.
-    let out = run_op(&ctx, &p, op_named("hover").unwrap(), &ask(2, "thing"), &r).unwrap();
-    assert_eq!(out, "const thing: 1 (settings: [null,null]) at 2:16");
+    let out = run_op(&ctx, &p, op_named("diagnostics").unwrap(), &ask(0, ""), &r).unwrap();
+    assert_eq!(
+        out,
+        "a.ts:2:1: error TS2322: bad thing (settings: [null,null])"
+    );
+    // Where it's asked is a UTF-16 column: the emoji before the name is
+    // two. The stand-in answers the position it was asked.
     let out = run_op(
         &ctx,
         &p,
-        op_named("definition").unwrap(),
+        op_named("references").unwrap(),
         &ask(2, "thing"),
         &r,
     )
     .unwrap();
-    assert_eq!(out, "a.ts:1:14: export const thing = 1;");
-    let out = run_op(&ctx, &p, op_named("outline").unwrap(), &ask(0, ""), &r).unwrap();
-    assert_eq!(out, "variable thing  1-1\n  constant inner  1-1");
-    let out = run_op(&ctx, &p, op_named("diagnostics").unwrap(), &ask(0, ""), &r).unwrap();
-    assert_eq!(out, "a.ts:2:1: error TS2322: bad thing");
+    assert_eq!(out, "a.ts:2:17: const s = \"😀\"; thing;");
     let out = run_op(
         &ctx,
         &p,
@@ -239,7 +240,7 @@ fn ts_over_a_language_server() {
     let err = run_op(
         &ctx,
         &p,
-        op_named("callers").unwrap(),
+        op_named("references").unwrap(),
         &Ask {
             file: a.clone(),
             line: 1,
@@ -249,7 +250,7 @@ fn ts_over_a_language_server() {
         &r,
     )
     .unwrap_err();
-    assert_eq!(err, "tsrs: no call hierarchy here");
+    assert_eq!(err, "tsrs: no references here");
     let servers = p.servers();
     let s = servers
         .get(&r)
@@ -341,7 +342,7 @@ fn fake_lsp() {
                 settings = m["result"].to_string();
                 send(
                     &mut w,
-                    json!({ "jsonrpc": "2.0", "id": init_id, "result": { "capabilities": { "hoverProvider": true } } }),
+                    json!({ "jsonrpc": "2.0", "id": init_id, "result": { "capabilities": { "referencesProvider": true } } }),
                 );
             }
             "textDocument/didOpen" | "textDocument/didChange" => {
@@ -356,31 +357,24 @@ fn fake_lsp() {
                     &mut w,
                     json!({ "jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
                     "uri": uri, "diagnostics": [{ "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 5 } },
-                        "severity": 1, "message": "bad\nthing", "code": 2322 }] } }),
+                        "severity": 1, "message": format!("bad\nthing (settings: {settings})"), "code": 2322 }] } }),
                 );
             }
-            "textDocument/hover" => {
-                let pos = &p["position"];
-                reply(
-                    &mut w,
-                    json!({ "contents": { "kind": "markdown",
-                    "value": format!(" const thing: 1 (settings: {settings}) at {}:{} ", pos["line"].as_i64().unwrap() + 1, pos["character"]) } }),
-                );
-            }
-            "textDocument/definition" => {
-                let uri = p["textDocument"]["uri"].clone();
-                reply(
-                    &mut w,
-                    json!([{ "uri": uri, "range": { "start": { "line": 0, "character": 13 }, "end": { "line": 0, "character": 18 } } }]),
-                );
-            }
-            "textDocument/documentSymbol" => {
-                let r1 = json!({ "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 22 } });
-                reply(
-                    &mut w,
-                    json!([{ "name": "thing", "kind": 13, "range": r1, "selectionRange": r1,
-                    "children": [{ "name": "inner", "kind": 14, "range": r1, "selectionRange": r1 }] }]),
-                );
+            "textDocument/references" => {
+                // Where it was asked, or for the moved file an error.
+                let uri = p["textDocument"]["uri"].as_str().unwrap().to_string();
+                if uri.ends_with("/c.ts") {
+                    send(
+                        &mut w,
+                        json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "no references here" } }),
+                    );
+                } else {
+                    let pos = p["position"].clone();
+                    reply(
+                        &mut w,
+                        json!([{ "uri": uri, "range": { "start": pos, "end": pos } }]),
+                    );
+                }
             }
             "textDocument/rename" => {
                 // Every whole "thing" in the file, by UTF-16 column.
@@ -412,14 +406,9 @@ fn fake_lsp() {
             "shutdown" => reply(&mut w, Value::Null),
             "exit" => return,
             _ if id.is_some() => {
-                let msg = if method == "textDocument/prepareCallHierarchy" {
-                    "no call hierarchy here".to_string()
-                } else {
-                    format!("no {method}")
-                };
                 send(
                     &mut w,
-                    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": msg } }),
+                    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": format!("no {method}") } }),
                 );
             }
             _ => {}

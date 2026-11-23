@@ -1,6 +1,6 @@
 //! The ts plugin's tools: where, as file and 1-based line with a column or
-//! a symbol on that line, or a symbol alone to search for; and what each
-//! asks the language server and how it says the answer.
+//! a symbol on that line; and what each asks the language server and how
+//! it says the answer.
 //! Ported from internal/bundled/ts/tools.go:1-449.
 
 use std::time::Duration;
@@ -21,7 +21,6 @@ pub struct Ask {
     pub line: i64,
     pub character: i64,
     pub symbol: String,
-    pub query: String,
     pub direction: String,
     pub new_name: String,
     pub to: String,
@@ -35,7 +34,7 @@ pub type Do = fn(&Ctx, &Server, &str, Position, &Ask, &str) -> Result<String, St
 pub struct Op {
     pub name: &'static str,
     pub description: &'static str,
-    /// "position", "file" or "query"
+    /// "position" or "file"
     pub needs: &'static str,
     pub run: Do,
 }
@@ -84,59 +83,16 @@ impl Location {
 /// The tools, in the order they're listed.
 pub static OPS: &[Op] = &[
     Op {
-        name: "definition",
-        needs: "position",
-        description: "Where the symbol at a position is declared.",
-        run: definition,
-    },
-    Op {
         name: "references",
         needs: "position",
         description: "Every use of the symbol at a position, across the checkout, its declaration left out.",
         run: references,
     },
     Op {
-        name: "implementation",
-        needs: "position",
-        description: "What implements the interface or abstract member at a position.",
-        run: implementation,
-    },
-    Op {
-        name: "hover",
-        needs: "position",
-        description: "The type and docs of the symbol at a position.",
-        run: hover,
-    },
-    Op {
-        name: "callers",
-        needs: "position",
-        description: "The functions that call the function at a position.",
-        run: callers,
-    },
-    Op {
-        name: "callees",
-        needs: "position",
-        description: "The functions the function at a position calls.",
-        run: callees,
-    },
-    Op {
-        name: "outline",
-        needs: "file",
-        description: "A file's declarations, nested, with their lines: read only the range you need.",
-        run: outline,
-    },
-    Op {
         name: "diagnostics",
         needs: "file",
         description: "A file's type errors and warnings, as the compiler sees them now.",
         run: diagnostics,
-    },
-    Op {
-        name: "find_symbol",
-        needs: "query",
-        description: "Declarations whose name matches query, across the checkout. In a monorepo this loads every \
-                      project: prefer a position-taking tool with file and line when you know where to look.",
-        run: find_symbol,
     },
     Op {
         name: "rename",
@@ -165,7 +121,6 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// Does op for a, asked from cwd.
 pub fn run_op(ctx: &Ctx, p: &Pool, op: &Op, a: &Ask, cwd: &str) -> Result<String, String> {
     let ctx = ctx.with_timeout(CALL_TIMEOUT);
-    let mut a = a.clone();
     let mut file = a.file.clone();
     if !file.is_empty() && !std::path::Path::new(&file).is_absolute() {
         file = std::path::Path::new(cwd)
@@ -175,15 +130,6 @@ pub fn run_op(ctx: &Ctx, p: &Pool, op: &Op, a: &Ask, cwd: &str) -> Result<String
     }
     let anchor = if file.is_empty() { cwd } else { &file };
     let s = p.server_for(&ctx, anchor)?;
-    if op.needs == "query" {
-        if a.query.is_empty() {
-            a.query = a.symbol.clone();
-        }
-        if a.query.is_empty() {
-            return Err("give query: the name, or part of it, to look for".into());
-        }
-        return (op.run)(&ctx, &s, "", Position::default(), &a, cwd);
-    }
     if file.is_empty() {
         return Err(
             "give file, and for this tool a line with a character or a symbol on it".into(),
@@ -192,9 +138,9 @@ pub fn run_op(ctx: &Ctx, p: &Pool, op: &Op, a: &Ask, cwd: &str) -> Result<String
     let uri = s.open(&file)?;
     let mut pos = Position::default();
     if op.needs == "position" {
-        pos = position(&file, &a)?;
+        pos = position(&file, a)?;
     }
-    (op.run)(&ctx, &s, &uri, pos, &a, cwd)
+    (op.run)(&ctx, &s, &uri, pos, a, cwd)
 }
 
 /// Where a points in file: its column, or where its symbol first stands
@@ -266,25 +212,6 @@ pub(crate) fn doc_params(uri: &str, pos: Position, extra: Value) -> Value {
     m
 }
 
-fn definition(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    pos: Position,
-    _: &Ask,
-    cwd: &str,
-) -> Result<String, String> {
-    locations(
-        ctx,
-        s,
-        "textDocument/definition",
-        uri,
-        pos,
-        Value::Null,
-        cwd,
-    )
-}
-
 fn references(
     ctx: &Ctx,
     s: &Server,
@@ -295,25 +222,6 @@ fn references(
 ) -> Result<String, String> {
     let extra = serde_json::json!({ "context": { "includeDeclaration": false } });
     locations(ctx, s, "textDocument/references", uri, pos, extra, cwd)
-}
-
-fn implementation(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    pos: Position,
-    _: &Ask,
-    cwd: &str,
-) -> Result<String, String> {
-    locations(
-        ctx,
-        s,
-        "textDocument/implementation",
-        uri,
-        pos,
-        Value::Null,
-        cwd,
-    )
 }
 
 fn locations(
@@ -384,180 +292,6 @@ pub(crate) fn limit(lines: &[String], n: usize) -> String {
     format!("{}\n… and {} more", lines[..n].join("\n"), lines.len() - n)
 }
 
-fn hover(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    pos: Position,
-    _: &Ask,
-    _: &str,
-) -> Result<String, String> {
-    #[derive(Deserialize, Default)]
-    #[serde(default)]
-    struct Hover {
-        contents: Option<Box<RawValue>>,
-    }
-    let res = s.call(
-        ctx,
-        "textDocument/hover",
-        &doc_params(uri, pos, Value::Null),
-    )?;
-    let h: Hover = decode(res.as_deref())?;
-    let t = markup(h.contents.as_deref().map_or("", RawValue::get));
-    if !t.is_empty() {
-        return Ok(t);
-    }
-    Ok("nothing to say about that position".into())
-}
-
-/// Hover contents as text: MarkupContent, a MarkedString, or a list of
-/// them.
-pub(crate) fn markup(v: &str) -> String {
-    let v = v.trim();
-    if v.starts_with('{') {
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct Mc {
-            value: String,
-        }
-        if let Ok(mc) = rush_state::json::from_slice::<Mc>(v.as_bytes())
-            && !mc.value.is_empty()
-        {
-            return mc.value.trim().to_string();
-        }
-    }
-    if let Ok(s) = serde_json::from_str::<String>(v) {
-        return s.trim().to_string();
-    }
-    if let Ok(list) = serde_json::from_str::<Vec<Box<RawValue>>>(v) {
-        return list
-            .iter()
-            .map(|x| markup(x.get()))
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-    }
-    String::new()
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct HierarchyItem {
-    name: String,
-    kind: i64,
-    uri: String,
-    #[serde(rename = "selectionRange")]
-    selection_range: Range,
-}
-
-fn callers(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    pos: Position,
-    _: &Ask,
-    cwd: &str,
-) -> Result<String, String> {
-    calls(ctx, s, "callHierarchy/incomingCalls", "from", uri, pos, cwd)
-}
-
-fn callees(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    pos: Position,
-    _: &Ask,
-    cwd: &str,
-) -> Result<String, String> {
-    calls(ctx, s, "callHierarchy/outgoingCalls", "to", uri, pos, cwd)
-}
-
-fn calls(
-    ctx: &Ctx,
-    s: &Server,
-    method: &str,
-    side: &str,
-    uri: &str,
-    pos: Position,
-    cwd: &str,
-) -> Result<String, String> {
-    let r = s.call(
-        ctx,
-        "textDocument/prepareCallHierarchy",
-        &doc_params(uri, pos, Value::Null),
-    )?;
-    let items: Vec<Box<RawValue>> = decode(r.as_deref())?;
-    let Some(first) = items.first() else {
-        return Ok("no function at that position".into());
-    };
-    let r = s.call(ctx, method, &serde_json::json!({ "item": first }))?;
-    let res: Vec<std::collections::HashMap<String, Box<RawValue>>> = decode(r.as_deref())?;
-    let mut out: Vec<String> = res
-        .iter()
-        .filter_map(|c| {
-            let it: HierarchyItem =
-                rush_state::json::from_slice(c.get(side)?.get().as_bytes()).ok()?;
-            Some(format!(
-                "{} {}  {}",
-                kind_name(it.kind),
-                it.name,
-                where_(&it.uri, it.selection_range.start, cwd)
-            ))
-        })
-        .collect();
-    if out.is_empty() {
-        return Ok("none".into());
-    }
-    out.sort();
-    Ok(limit(&out, 200))
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct DocSymbol {
-    name: String,
-    kind: i64,
-    range: Range,
-    children: Option<Vec<DocSymbol>>,
-    location: Option<Location>,
-}
-
-fn outline(
-    ctx: &Ctx,
-    s: &Server,
-    uri: &str,
-    _: Position,
-    _: &Ask,
-    _: &str,
-) -> Result<String, String> {
-    let r = s.call(
-        ctx,
-        "textDocument/documentSymbol",
-        &serde_json::json!({ "textDocument": { "uri": uri } }),
-    )?;
-    let syms: Vec<DocSymbol> = decode(r.as_deref())?;
-    let mut out = Vec::new();
-    fn walk(ss: &[DocSymbol], depth: usize, out: &mut Vec<String>) {
-        for d in ss {
-            let r = d.location.as_ref().and_then(|l| l.range).unwrap_or(d.range);
-            out.push(format!(
-                "{}{} {}  {}-{}",
-                "  ".repeat(depth),
-                kind_name(d.kind),
-                d.name,
-                r.start.line + 1,
-                r.end.line + 1
-            ));
-            walk(d.children.as_deref().unwrap_or_default(), depth + 1, out);
-        }
-    }
-    walk(&syms, 0, &mut out);
-    if out.is_empty() {
-        return Ok("no declarations".into());
-    }
-    Ok(limit(&out, 400))
-}
-
 /// A member that's there, even as null, read as written.
 fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Box<RawValue>>, D::Error> {
     Box::<RawValue>::deserialize(d).map(Some)
@@ -619,81 +353,6 @@ fn diagnostics(
         })
         .collect();
     Ok(limit(&out, 200))
-}
-
-fn find_symbol(
-    ctx: &Ctx,
-    s: &Server,
-    _: &str,
-    _: Position,
-    a: &Ask,
-    cwd: &str,
-) -> Result<String, String> {
-    let r = s.call(
-        ctx,
-        "workspace/symbol",
-        &serde_json::json!({ "query": a.query }),
-    )?;
-    let syms: Vec<DocSymbol> = decode(r.as_deref())?;
-    let mut out = Vec::new();
-    for d in &syms {
-        let Some(l) = &d.location else {
-            continue;
-        };
-        let (u, p) = l.at();
-        let path = path_of(&u);
-        if !path.starts_with(&s.root) || path.contains("/node_modules/") {
-            continue;
-        }
-        out.push(format!(
-            "{} {}  {}",
-            kind_name(d.kind),
-            d.name,
-            where_(&u, p, cwd)
-        ));
-    }
-    if out.is_empty() {
-        return Ok("none".into());
-    }
-    out.sort();
-    Ok(limit(&out, 100))
-}
-
-/// LSP's SymbolKind in a word.
-pub(crate) fn kind_name(k: i64) -> &'static str {
-    const NAMES: [&str; 27] = [
-        "",
-        "file",
-        "module",
-        "namespace",
-        "package",
-        "class",
-        "method",
-        "property",
-        "field",
-        "constructor",
-        "enum",
-        "interface",
-        "function",
-        "variable",
-        "constant",
-        "string",
-        "number",
-        "boolean",
-        "array",
-        "object",
-        "key",
-        "null",
-        "enum-member",
-        "struct",
-        "event",
-        "operator",
-        "type-parameter",
-    ];
-    if k > 0 && (k as usize) < NAMES.len() {
-        return NAMES[k as usize];
-    }
-    "symbol"
 }
 
 #[cfg(test)]
@@ -775,23 +434,11 @@ mod tests {
         assert!(decode_locations("null").unwrap().is_empty());
     }
 
-    // ts_test.go TestMarkup
     #[test]
-    fn markups() {
-        for (input, want) in [
-            (r#"{"kind":"markdown","value":"**x**"}"#, "**x**"),
-            (r#""plain""#, "plain"),
-            (r#"["a",{"language":"ts","value":"b"}]"#, "a\n\nb"),
-        ] {
-            assert_eq!(markup(input), want, "markup({input})");
-        }
-    }
-
-    #[test]
-    fn limits_and_kinds() {
+    fn limits_and_needs() {
         let lines: Vec<String> = (0..5).map(|i| i.to_string()).collect();
         assert_eq!(limit(&lines, 3), "0\n1\n2\n… and 2 more");
-        assert_eq!((kind_name(12), kind_name(99)), ("function", "symbol"));
-        assert_eq!(op_named("find_symbol").map(|o| o.needs), Some("query"));
+        assert_eq!(op_named("rename_file").map(|o| o.needs), Some("file"));
+        assert!(op_named("find_symbol").is_none());
     }
 }

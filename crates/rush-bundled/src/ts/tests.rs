@@ -62,8 +62,8 @@ fn pool_caps_a_server() {
         symbol: "a".into(),
         ..Default::default()
     };
-    let out = run_op(&ctx, &p, op_named("hover").unwrap(), &a, &root).unwrap();
-    assert!(out.contains('a'), "hover = {out}");
+    let out = run_op(&ctx, &p, op_named("diagnostics").unwrap(), &a, &root).unwrap();
+    assert_eq!(out, "no problems");
     p.close_all();
 }
 
@@ -74,15 +74,8 @@ fn cli_and_tools_lists() {
     assert_eq!(
         names,
         [
-            "definition",
             "references",
-            "implementation",
-            "hover",
-            "callers",
-            "callees",
-            "outline",
             "diagnostics",
-            "find-symbol",
             "rename",
             "rename-file",
             "status"
@@ -94,25 +87,23 @@ fn cli_and_tools_lists() {
     );
     assert_eq!(
         specs[0].description,
-        "Where the symbol at a position is declared"
+        "Every use of the symbol at a position, across the checkout, its declaration left out"
     );
+    assert_eq!(specs[1].usage, "--file F");
     assert_eq!(
-        specs[9].usage,
+        specs[2].usage,
         "--file F --line N (--symbol S | --character C) --new-name N"
     );
-    assert_eq!(specs[10].usage, "--file F --to PATH");
-    assert_eq!(
-        specs[8].description,
-        "Declarations whose name matches query, across the checkout"
-    );
+    assert_eq!(specs[3].usage, "--file F --to PATH");
     let tools = tool_list();
+    assert_eq!(tools.len(), 4);
     assert_eq!(
-        tools[9]["inputSchema"]["required"],
+        tools[2]["inputSchema"]["required"],
         serde_json::json!(["file", "line", "new_name"])
     );
     assert_eq!(
-        tools[8]["inputSchema"]["properties"]["query"]["type"],
-        "string"
+        tools[3]["inputSchema"]["required"],
+        serde_json::json!(["file", "to"])
     );
 }
 
@@ -137,12 +128,12 @@ fn cli_refuses_what_it_doesnt_know() {
         (out.exit, out.stderr.as_str()),
         (2, "rush ts: no command nope\n")
     );
-    let out = r("hover", &["--wat", "x"]);
+    let out = r("references", &["--wat", "x"]);
     assert_eq!(
         (out.exit, out.stderr.as_str()),
         (2, "rush ts: unknown --wat\n")
     );
-    let out = r("hover", &["--file=/nowhere/at/all.ts", "--line", "1"]);
+    let out = r("references", &["--file=/nowhere/at/all.ts", "--line", "1"]);
     assert_eq!(out.exit, 1);
     assert!(out.stderr.contains("is in no checkout"), "{out:?}");
 }

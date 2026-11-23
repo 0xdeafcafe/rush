@@ -301,8 +301,7 @@ fn fields(kv: &[(&str, serde_json::Value)]) -> rush_events::Fields {
 fn cap_error(s: &Server, held: u64, max: u64) -> String {
     format!(
         "the {} language server for {} held {}, past its {} cap, so rush stopped it. \
-         Narrow the query: give file and line rather than a bare symbol search (that loads every project), \
-         and work one package at a time. The next call starts a fresh server.",
+         Work one package at a time. The next call starts a fresh server.",
         s.engine.name,
         s.root,
         gatecore::size(held),

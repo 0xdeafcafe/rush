@@ -28,11 +28,10 @@ use serde::Deserialize;
 pub const NAME: &str = "ts";
 
 /// Added to every rush-mode session's system prompt.
-pub const PROMPT: &str = "For TypeScript and JavaScript symbols, use rush's ts tools (definition, references, hover, \
-implementation, callers, callees, outline, diagnostics, find_symbol, rename, rename_file; or `rush ts <tool> --file F --line N \
---symbol S` from a shell) rather than grepping: they're type-aware and share one language server per \
-checkout. Give file and line: find_symbol searches every project, which in a monorepo is slow and heavy. \
-Rename and move files with rename and rename_file: they rewrite every use and import.";
+pub const PROMPT: &str = "For TypeScript and JavaScript symbols, use rush's ts tools (references, diagnostics, rename, \
+rename_file; or `rush ts <tool> --file F --line N --symbol S` from a shell) rather than grepping: they're \
+type-aware and share one language server per checkout. Rename and move files with rename and rename_file: \
+they rewrite every use and import.";
 
 /// The plugin's.
 pub fn manifest() -> Manifest {
@@ -61,7 +60,7 @@ pub fn manifest() -> Manifest {
                 "Memory cap",
                 &["2G", "3G", "4G", "6G", "8G", "off"],
                 "4G",
-                "A server holding more is stopped, and the call told to narrow its query",
+                "A server holding more is stopped, and the call told to work one package at a time",
             ),
             choice(
                 "idle",
@@ -79,8 +78,8 @@ pub fn manifest() -> Manifest {
         ..crate::manifest(
             NAME,
             "code",
-            "TypeScript code intelligence for every agent: definitions, references, hover, callers, outlines and \
-             type errors from one language server per checkout, shared by all agents in it. tsrs where it's installed \
+            "TypeScript code intelligence for every agent: references, type errors and renames \
+             from one language server per checkout, shared by all agents in it. tsrs where it's installed \
              (npm i -g @maschwenk/tsrs), else the project's tsgo. Started through the gate, stopped past its memory cap \
              or after it's idle.",
             128,
@@ -98,7 +97,6 @@ fn cli_specs() -> Vec<CliSpec> {
         .map(|op| {
             let mut usage = match op.needs {
                 "file" => "--file F".to_string(),
-                "query" => "--query Q".to_string(),
                 _ => "--file F --line N (--symbol S | --character C)".to_string(),
             };
             match op.name {
@@ -218,14 +216,6 @@ fn tool_list() -> Vec<serde_json::Value> {
                     props.insert("file".into(), s("The file, absolute or from your folder"));
                     req = vec!["file"];
                 }
-                "query" => {
-                    props.insert("query".into(), s("The name, or part of it"));
-                    props.insert(
-                        "file".into(),
-                        s("Any file in the checkout to search, when it isn't your folder's"),
-                    );
-                    req = vec!["query"];
-                }
                 _ => {}
             }
             match op.name {
@@ -282,7 +272,6 @@ fn run_cli(ctx: &Ctx, pool: &Pool, r: &CliRun) -> CliResult {
             "--line" | "-l" => a.line = num(&v),
             "--character" | "-c" => a.character = num(&v),
             "--symbol" | "-s" => a.symbol = v,
-            "--query" | "-q" => a.query = v,
             "--new-name" => a.new_name = v,
             "--to" => a.to = v,
             _ => {

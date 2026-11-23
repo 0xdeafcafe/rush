@@ -24,6 +24,7 @@ checkout, one file opened in each module, physical footprint:
 | then `workspace/symbol` | past 6 GiB | past 6 GiB |
 
 A symbol search with no file loads every project, whichever engine.
+rush no longer has a tool that makes one (see Removed, below).
 
 ## Decisions
 
@@ -41,7 +42,7 @@ A symbol search with no file loads every project, whichever engine.
    lives and noting what it holds, so its reservation shrinks to what
    it's yet to take. Inside a gated run it isn't gated again.
 6. **Capped** (default 4 GiB): past it the server is killed, the call
-   told to give a file and line, and the next call starts a fresh one.
+   told to work one package at a time, and the next call starts a fresh one.
    Closed after 10 minutes idle. The guard names `tsrs` and `tsgo`, so
    it stops a server too when the machine runs out.
 
@@ -49,3 +50,10 @@ A symbol search with no file loads every project, whichever engine.
 
 Rename and moving a file with its imports rewritten: they need LSP's
 workspace edits applied to files, which tslsp-cli still does.
+
+## Removed
+
+2026-11-23: the `definition`, `implementation`, `hover`, `callers`,
+`callees`, `outline` and `find_symbol` tools, with no recorded use in 25
+days of the event log. `references`, `diagnostics`, `rename` and
+`rename_file` stay, and `rush ts status`.

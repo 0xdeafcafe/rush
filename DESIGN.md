@@ -5725,6 +5725,16 @@ only its summary. Runs on main wait for each other rather than cut one
 short; GitHub keeps one waiting, so two pushes close together are measured
 as one, and the comparison names the commits it spans.
 
+## Removed (Rust-only)
+
+Features taken out, each with no recorded use in 25 days of the event
+log when it went.
+
+- 2026-11-23: seven of the ts plugin's tools: `definition`,
+  `implementation`, `hover`, `callers`, `callees`, `outline` and
+  `find_symbol`. `references`, `diagnostics`, `rename`, `rename_file` and
+  `rush ts status` stay (docs/typescript.md).
+
 ## Milestones (full plan: PLAN.md)
 
 1. **Read-only Claude** (this): the agent list (header, rows, summaries,
