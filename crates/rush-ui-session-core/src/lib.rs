@@ -31,6 +31,7 @@ pub mod conversation;
 pub mod dock;
 pub mod emeritus;
 pub mod exchange;
+pub mod evict;
 pub mod finish;
 pub mod history;
 // What a session sends through, and the paint helpers, are the base's.
@@ -192,6 +193,8 @@ pub fn register(x: &mut Ext) {
     x.status.push(dock::status);
     // The views' dropdown under the Conversation tab, while open, has the
     // keys and the pointer before anything else.
+    // What sessions out of sight for a while hold of their runs, let go.
+    evict::register(x);
     x.session_keys.insert(0, presets::menu_key);
     x.mouse.insert(0, presets::menu_mouse);
     // Every key and turn of the wheel, first and passed on: a view's
@@ -439,6 +442,10 @@ pub struct Conn {
 }
 
 impl std::ops::Deref for Conn {
+    /// When it was last seen shown (opened, beside the list, a tile's),
+    /// 0 for not yet: its runs' conversations are let go once it hasn't
+    /// been for a while (evict.rs; Rust-only).
+    pub shown_at: Ms,
     type Target = ConnCore;
     fn deref(&self) -> &ConnCore {
         &self.base

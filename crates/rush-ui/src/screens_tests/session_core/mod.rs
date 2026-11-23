@@ -10,6 +10,7 @@ mod tests_changes_inline;
 mod tests_clicks;
 mod tests_cold;
 pub(super) mod tests_drops;
+mod tests_evict;
 mod tests_exchange_inline;
 mod tests_filementions;
 mod tests_finish_inline;

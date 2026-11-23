@@ -86,3 +86,7 @@ tempfile.workspace = true
 [[bench]]
 name = "frame"
 harness = false
+
+[[bench]]
+name = "sessmem"
+harness = false

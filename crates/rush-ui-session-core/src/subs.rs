@@ -627,6 +627,73 @@ pub struct Runs {
     /// Each run's conversation read whole, by id, while Changes was open
     /// (fullSubs); handed to the session as its helpers (setHelpers).
     pub full: HashMap<String, Arc<Session>>,
+    /// Every run was read whole for Changes before [`Runs::evict`] let
+    /// them go: they're read whole again when the session next shows, so
+    /// its Changes (and the header's count of them) are as they were
+    /// (Rust-only; Go never lets fullSubs go).
+    pub full_again: bool,
+}
+
+impl Runs {
+    /// Lets go of what's held of its runs' conversations, read whole or
+    /// read on (Rust-only, evict.rs): the agents rush hosted for it, every
+    /// run read for Changes, the runs read on for their numbers, the
+    /// process table. Their numbers, rows, picks and the run shown whole
+    /// stay; what's let go is read again from the transcripts once the
+    /// session shows (refresh: a run due whole and not held is due at
+    /// once). Not while a read is out, which would bring them back: None
+    /// then, else what was let go, to drop off the UI thread.
+    pub fn evict(&mut self) -> Option<Evicted> {
+        if self.reading {
+            return None;
+        }
+        let Ok(mut r) = self.reader.try_lock() else {
+            return None;
+        };
+        self.full_again |= self.full.keys().any(|id| !id.starts_with(SPAWN_PREFIX));
+        let on: Vec<String> = r
+            .tails
+            .iter()
+            .filter(|(_, f)| matches!(f, Followed::Read(..)))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let read_on: Vec<Followed> = on.iter().filter_map(|id| r.tails.remove(id)).collect();
+        Some(Evicted {
+            full: std::mem::take(&mut self.full),
+            reader_full: std::mem::take(&mut r.full),
+            read_on,
+            table: r.table.take(),
+        })
+    }
+
+    /// Whether [`Runs::evict`] would let anything go.
+    pub fn holds(&self) -> bool {
+        !self.full.is_empty()
+            || self.reader.try_lock().is_ok_and(|r| {
+                !r.full.is_empty()
+                    || r.table.is_some()
+                    || r.tails.values().any(|f| matches!(f, Followed::Read(..)))
+            })
+    }
+}
+
+/// What [`Runs::evict`] let go: dropped where it's handed (a long
+/// conversation is thousands of frees).
+pub struct Evicted {
+    full: HashMap<String, Arc<Session>>,
+    read_on: Vec<Followed>,
+    // Held only to be dropped where it's handed.
+    #[allow(dead_code)]
+    reader_full: HashMap<String, (u64, Ms, Option<ReadOn>)>,
+    #[allow(dead_code)]
+    table: Option<rush_sys::proc::Table>,
+}
+
+impl Evicted {
+    /// How many conversations it holds (each a run's).
+    pub fn conversations(&self) -> usize {
+        self.full.len() + self.read_on.len()
+    }
 }
 
 /// What a read is asked for.
@@ -1834,7 +1901,7 @@ pub fn refresh(m: &mut Model, key: &str) {
     let mut full = Vec::new();
     for sa in &r.subs {
         let spawn = sa.id.strip_prefix(SPAWN_PREFIX);
-        if sa.path.is_empty() || spawn.is_none() && !r.full_want {
+        if sa.path.is_empty() || spawn.is_none() && !r.full_want && !r.full_again {
             continue;
         }
         // Another agent's own session is read back by its adapter.
