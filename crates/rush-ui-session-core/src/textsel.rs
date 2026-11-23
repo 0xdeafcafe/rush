@@ -415,8 +415,7 @@ fn click(m: &mut Model, key: &str, y: usize) -> Out {
     };
     if let Some((kind, text)) = rush_convo::render::needs_of(&r) {
         let (kind, text) = (kind.to_string(), text.to_string());
-        super::turnwants::act_on_needs(m, key, &kind, &text);
-        return Out::Draw;
+        return super::turnwants::act_on_needs(m, key, &kind, &text);
     }
     if r == rush_convo::render::SHOW_ALL_REF {
         v.verbose = !v.verbose;

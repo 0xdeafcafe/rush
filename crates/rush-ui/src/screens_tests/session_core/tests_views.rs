@@ -1852,8 +1852,8 @@ fn shell_writes_in_changes() {
 
 /// A finished turn whose last message wants something of you ends with a
 /// Needs-you section, laid out by the model that read it; a click on a
-/// reply puts it in the box (turnwants.go needsOf, rushmode.go
-/// actOnNeeds).
+/// reply sends it, and its key puts it in the box (turnwants.go needsOf,
+/// rushmode.go actOnNeeds).
 #[test]
 fn needs_you_under_the_last_answer() {
     use crate::screens::session_core::turnwants::{TurnState, TurnWants, needs_of};
@@ -1886,17 +1886,25 @@ fn needs_you_under_the_last_answer() {
     let y = row_with(&mut m, "Needs you · approve PR #52").expect("the section");
     assert!(s[y].contains("╭ ! Needs you"), "{}", s[y]);
     let r = row_with(&mut m, "yes, ship it").expect("the reply");
-    assert!(s[r].contains(" 1  yes, ship it") && s[r].contains("click to reply"));
+    assert!(s[r].contains(" 1  yes, ship it") && s[r].contains("click sends"));
     assert!(s[r + 1].contains(" 2  not yet"), "{}", s[r + 1]);
     assert!(s[r + 2].contains(" ✎  Something else"), "{}", s[r + 2]);
     let x = s[r].find("yes").unwrap();
     let x = rush_core::text::width(&s[r][..x]);
+    // A click on a reply with something already in the box sends
+    // nothing and leaves what you were writing.
+    conn(&mut m, KEY).input.set("half a thought");
     click(&mut m, MouseKind::Down(Button::Left), x, r);
     click(&mut m, MouseKind::Up(Button::Left), x, r);
-    assert_eq!(input(&mut m), "yes, ship it");
-    assert_eq!(flash(&m), "in your message box · enter sends it");
+    assert_eq!(input(&mut m), "half a thought");
+    assert_eq!(
+        flash(&m),
+        "your message box has a draft · send or clear it first"
+    );
+    assert!(needs_sent(&fake).is_empty(), "{:?}", needs_sent(&fake));
     // ↑ from the empty box picks the row for your own words; a reply's
-    // number puts it in the box, the box has the keys again.
+    // number puts it in the box to change first, the box has the keys
+    // again.
     conn(&mut m, KEY).input.clear();
     press(&mut m, "up");
     let own = rush_convo::render::needs_ref(rush_convo::render::NEEDS_OWN, "");
@@ -1905,6 +1913,7 @@ fn needs_you_under_the_last_answer() {
     assert!(s[r + 2].contains("enter types it"), "{}", s[r + 2]);
     press(&mut m, "2");
     assert_eq!(input(&mut m), "not yet");
+    assert_eq!(flash(&m), "in your message box · enter sends it");
     assert_eq!(m.session.as_ref().unwrap().sel, "");
     // A number typed into the box is only typed.
     press(&mut m, "1");
@@ -1922,6 +1931,11 @@ fn needs_you_under_the_last_answer() {
     click(&mut m, MouseKind::Up(Button::Left), 8, o);
     assert_eq!(m.session.as_ref().unwrap().sel, "");
     assert_eq!(flash(&m), "type your answer · enter sends it");
+    // A click on a reply, the box empty, sends it: no second step.
+    click(&mut m, MouseKind::Down(Button::Left), x, r);
+    click(&mut m, MouseKind::Up(Button::Left), x, r);
+    assert_eq!(input(&mut m), "");
+    assert_ne!(flash(&m), "in your message box · enter sends it");
     // A turn after it: what was read is of the one before.
     m.agents[0].job.updated_at = NOW;
     let a = m.agents[0].clone();
@@ -1989,8 +2003,125 @@ fn needs_you_commands_copy() {
     press(&mut m, "super+c");
     assert_eq!(
         m.pending_copy.as_deref(),
-        Some("Needs you · approve PR #52\nmake ship\ngit push origin main\nyes, ship it")
+        Some(
+            "Needs you · approve PR #52\nmake ship\ngit push origin main\nrun them for me\nyes, ship it"
+        )
     );
+}
+
+/// A session whose last turn was read as wanting two commands run or a
+/// reply.
+fn needs_two_commands() -> (Model, std::sync::Arc<Fake>) {
+    use crate::screens::session_core::turnwants::{TurnState, TurnWants};
+    use rush_convo::render::NeedsItem;
+    let fake = Fake::new();
+    let mut a = agent("steer", State::Done);
+    a.job.updated_at = NOW - 60_000;
+    let mut m = open(a, &fake, 120, 40);
+    worked(&mut m);
+    let item = |k: &str, t: &str| NeedsItem {
+        kind: k.into(),
+        text: t.into(),
+    };
+    m.kept::<TurnState>().got.insert(
+        KEY.into(),
+        TurnWants {
+            at: NOW - 60_000,
+            wants: "you".into(),
+            line: "approve PR #52".into(),
+            ui: vec![
+                item("run", "make ship"),
+                item("run", "git push origin main"),
+                item("reply", "yes, ship it"),
+            ],
+            ..TurnWants::default()
+        },
+    );
+    (m, fake)
+}
+
+/// What the fake host was asked to send, in order.
+fn needs_sent(fake: &Fake) -> Vec<String> {
+    fake.ops()
+        .into_iter()
+        .filter_map(|o| match o {
+            Op::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A click on a reply of the Needs-you card sends it, and the row under
+/// the card's commands asks the agent to run them: each in one step,
+/// nothing left in the box to send. (The session isn't one rush hosts
+/// here, so what goes is resumed with, not an op the fake host records;
+/// the words that go are run_for_me's.)
+#[test]
+fn needs_you_clicks_send() {
+    use crate::screens::session_core::turnwants::run_for_me;
+    let (mut m, fake) = needs_two_commands();
+    let s = screen(&mut m);
+    let run = row_with(&mut m, "run them for me").expect("the row");
+    assert!(
+        s[run].contains("↩ run them for me") && s[run].contains("click sends"),
+        "{}",
+        s[run]
+    );
+    assert!(
+        s[run - 1].contains("$ git push origin main"),
+        "{}",
+        s[run - 1]
+    );
+    let x = col_of(&s[run], "run them");
+    click(&mut m, MouseKind::Down(Button::Left), x, run);
+    click(&mut m, MouseKind::Up(Button::Left), x, run);
+    assert_eq!(input(&mut m), "", "sent, not left in the box");
+    assert_ne!(flash(&m), "in your message box · enter sends it");
+    assert!(needs_sent(&fake).is_empty(), "{:?}", needs_sent(&fake));
+
+    let (mut m, _fake) = needs_two_commands();
+    let s = screen(&mut m);
+    let r = row_with(&mut m, "yes, ship it").expect("the reply");
+    let x = col_of(&s[r], "yes, ship");
+    click(&mut m, MouseKind::Down(Button::Left), x, r);
+    click(&mut m, MouseKind::Up(Button::Left), x, r);
+    assert_eq!(input(&mut m), "", "sent, not left in the box");
+    assert_ne!(flash(&m), "in your message box · enter sends it");
+
+    assert_eq!(
+        run_for_me("make ship\ngit push origin main"),
+        "Run these for me:\n```sh\nmake ship\ngit push origin main\n```"
+    );
+    assert_eq!(run_for_me("make ship"), "Run `make ship` for me.");
+    assert_eq!(
+        run_for_me("echo `date`"),
+        "Run this for me:\n```sh\necho `date`\n```"
+    );
+}
+
+/// A reading that asks something of you with nothing laid out to act on
+/// draws no section: its heading alone said nothing the message hadn't.
+#[test]
+fn needs_you_with_nothing_to_act_on_is_not_drawn() {
+    use crate::screens::session_core::turnwants::{TurnState, TurnWants, needs_of};
+    let fake = Fake::new();
+    let mut a = agent("steer", State::Done);
+    a.job.updated_at = NOW - 60_000;
+    let mut m = open(a.clone(), &fake, 120, 40);
+    worked(&mut m);
+    m.kept::<TurnState>().got.insert(
+        KEY.into(),
+        TurnWants {
+            at: NOW - 60_000,
+            wants: "ask".into(),
+            line: "which theme to keep".into(),
+            quote: "which theme".into(),
+            ..TurnWants::default()
+        },
+    );
+    assert_eq!(needs_of(&m, &a).reason, "");
+    screen(&mut m);
+    assert!(row_with(&mut m, "Needs you").is_none());
 }
 
 /// ← in the conversation goes back a stage at a time: it closes the open

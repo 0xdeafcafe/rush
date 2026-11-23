@@ -66,10 +66,12 @@ copied exactly, at most 15 words (\"QUOTE: I haven't pushed it\"). \
 Then, unless it's DONE, lay out what the user can do as up to 6 more lines, each a word, a colon, then a few words, \
 for rush to draw as a section the user acts on. The word is one of:\n\
 DO: a step only the user can take, by hand (\"DO: approve PR #41 on GitHub\").\n\
-RUN: a shell command the user should run, exactly as the message gives it; a click copies it (\"RUN: git push origin main\").\n\
+RUN: a shell command the user should run, exactly as the message gives it; a click copies it, and rush offers to have the agent run it (\"RUN: git push origin main\").\n\
 COPY: a value the user must paste somewhere, exactly as the message gives it, such as a hostname, an ID or a key name; \
 one per line, with what it is after \" — \" (\"COPY: d1u5r91gd2oxgy.cloudfront.net — the CNAME target\").\n\
-REPLY: a short reply the user could send to say yes, pick an option or answer, in the user's own voice; a click puts it in their message box (\"REPLY: yes, push it\").\n\
+REPLY: a short reply the user could send to say yes, pick an option or answer, in the user's own voice; a click sends it (\"REPLY: yes, push it\"). \
+Each REPLY is a whole answer by itself and the user sends only one: one per choice, never two that could both be meant, \
+never one that is another with a step added, and never one that only asks for a command a RUN line already gives.\n\
 LINK: a URL from the message the user needs to open.\n\
 NOTE: one fact the user needs to decide, at most 10 words.\n\
 Spell out each step with its exact names and values from the message; never a step that sends the user back to the message. \
@@ -237,7 +239,11 @@ pub fn state(m: &mut Model) -> &mut TurnState {
 /// (needsOf).
 pub fn needs_of(m: &Model, a: &Agent) -> Needs {
     let t = wants_of(m, a);
-    if !asks(&t) {
+    // Nothing laid out to act on: no section. Its heading alone, an
+    // empty frame under it, said only what the message above it just
+    // had (Rust-only: Go drew it). The list still has the agent under
+    // Needs you, with the reason on its row.
+    if !asks(&t) || t.ui.is_empty() {
         return Needs::default();
     }
     Needs {
@@ -519,10 +525,48 @@ fn brief(s: &str) -> String {
     rush_draw::truncate(one, 40, "…").into_owned()
 }
 
+/// The kind act_on_needs takes for a reply's own key (1, 2…): the reply
+/// put in your message box, to change before it's sent.
+const NEEDS_EDIT: &str = "edit";
+
+/// What asks the agent to run the section's commands (one to a line of
+/// cmds): on a line when it's one command with no backtick of its own,
+/// else in a fence.
+pub fn run_for_me(cmds: &str) -> String {
+    let cmds = cmds.trim();
+    if !cmds.contains('\n') && !cmds.contains('`') {
+        return format!("Run `{cmds}` for me.");
+    }
+    let n = if cmds.contains('\n') { "these" } else { "this" };
+    format!("Run {n} for me:\n```sh\n{cmds}\n```")
+}
+
+/// Sends text as your message, as typing it and enter would (the send
+/// mode, a cold cache's question and a sleeping agent's wake all as
+/// they are for a message typed). With something already in your
+/// message box nothing is sent and the box is left alone: what you were
+/// writing isn't lost to a click.
+fn send_reply(m: &mut Model, key: &str, text: &str) -> Out {
+    if !conn(m, key).input.is_empty() {
+        m.flash("your message box has a draft · send or clear it first");
+        return Out::Draw;
+    }
+    conn(m, key).input.set(text);
+    if let Some(v) = m.session.as_mut() {
+        v.sel.clear(); // back to typing
+    }
+    match super::keys::send(m, key, false) {
+        Out::Pass | Out::Idle => Out::Draw,
+        o => o,
+    }
+}
+
 /// Does what a row of the Needs-you section offers: a command or value
-/// copied, a reply put in your message box to send or change, a link
-/// opened (actOnNeeds).
-pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) {
+/// copied, a reply sent, or put in your message box to change first
+/// when it's picked by its key, the agent asked to run the commands, a
+/// link opened (actOnNeeds; Rust-only: Go put a clicked reply in the
+/// box too, and had no way to ask the agent to run a command).
+pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) -> Out {
     match kind {
         "run" => {
             m.copy_text(text.to_string());
@@ -539,7 +583,9 @@ pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) {
             m.copy_text(v.to_string());
             m.flash(&format!("copied · {}", brief(v)));
         }
-        "reply" => {
+        "reply" => return send_reply(m, key, text),
+        rush_convo::render::NEEDS_RUN => return send_reply(m, key, &run_for_me(text)),
+        NEEDS_EDIT => {
             conn(m, key).input.set(text);
             if let Some(v) = m.session.as_mut() {
                 v.sel.clear(); // back to typing
@@ -559,12 +605,14 @@ pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) {
         }
         _ => {}
     }
+    Out::Draw
 }
 
 /// A key on a picked row of the Needs-you section, nothing typed: a
-/// reply's number (1, 2…) puts that reply in your message box, as a click
-/// on it does; enter on a reply, or on the row for your own words, does
-/// what a click on it does. Only once a row is picked (↑ from the box), as
+/// reply's number (1, 2…) puts that reply in your message box, to change
+/// before you send it; enter on a reply, on the row that asks the agent
+/// to run the commands, or on the row for your own words, does what a
+/// click on it does. Only once a row is picked (↑ from the box), as
 /// a question card's numbers wait for ↑: a number typed into the box
 /// starts a message.
 pub fn needs_key(m: &mut Model, k: &crate::frame::Press) -> Out {
@@ -584,7 +632,11 @@ pub fn needs_key(m: &mut Model, k: &crate::frame::Press) -> Out {
         return Out::Pass;
     };
     let s = k.s.as_str();
-    let (kind, text) = if s == "enter" && matches!(kind, "reply" | rush_convo::render::NEEDS_OWN) {
+    let (kind, text) = if s == "enter"
+        && matches!(
+            kind,
+            "reply" | rush_convo::render::NEEDS_OWN | rush_convo::render::NEEDS_RUN
+        ) {
         (kind.to_string(), text.to_string())
     } else if let Some(t) = s
         .parse::<usize>()
@@ -596,10 +648,9 @@ pub fn needs_key(m: &mut Model, k: &crate::frame::Press) -> Out {
                 .map(|t| t.to_string())
         })
     {
-        ("reply".to_string(), t)
+        (NEEDS_EDIT.to_string(), t)
     } else {
         return Out::Pass;
     };
-    act_on_needs(m, &key, &kind, &text);
-    Out::Draw
+    act_on_needs(m, &key, &kind, &text)
 }

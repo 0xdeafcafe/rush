@@ -6,7 +6,7 @@ rush_testenv::sandboxed!();
 use std::collections::{HashMap, HashSet};
 
 use rush_convo::render::{
-    NEEDS_OWN, Needs, NeedsItem, has_quote, needs_choices, needs_of, needs_ref,
+    NEEDS_OWN, NEEDS_RUN, Needs, NeedsItem, has_quote, needs_choices, needs_of, needs_ref,
 };
 use rush_convo::{Options, Renderer, Session};
 
@@ -95,6 +95,8 @@ fn needs_section() {
     for want in [
         "☐ rebuild rush",
         "$ git push origin main",
+        "↩ run it for me",
+        "click sends",
         "click copies",
         " 1  yes, push it",
         "╰  ✎  Something else  type your own answer below",
@@ -104,6 +106,7 @@ fn needs_section() {
     }
     assert!(
         refs.contains(needs_ref("run", "git push origin main").as_str())
+            && refs.contains(needs_ref(NEEDS_RUN, "git push origin main").as_str())
             && refs.contains(needs_ref("reply", "yes, push it").as_str())
             && refs.contains(needs_ref(NEEDS_OWN, "").as_str()),
         "the command and reply rows aren't clickable"
@@ -151,19 +154,19 @@ fn needs_replies_are_choices() {
     let want = [
         "▍   ╭ ? Needs you · which way",
         "▍   │ · both build",
-        "▍   │  1  ship it now                                           click to reply",
-        "▍   │  2  wait for CI                                           click to reply",
-        "▍   ╰  ✎  Something else  type your own answer below          ↑ then 1–2 picks",
+        "▍   │  1  ship it now                                              click sends",
+        "▍   │  2  wait for CI                                              click sends",
+        "▍   ╰  ✎  Something else  type your own answer below        ↑ then 1–2 to edit",
     ];
     let got = section("");
     assert_eq!(got, want, "\n{}", got.join("\n"));
     let got = section(&needs_ref("reply", "wait for CI"));
     assert!(
-        got[3].contains(" 2  wait for CI") && got[3].contains("enter puts it in your box"),
+        got[3].contains(" 2  wait for CI") && got[3].contains("enter sends it"),
         "\n{}",
         got.join("\n")
     );
-    assert!(!got[4].contains("picks"), "\n{}", got.join("\n"));
+    assert!(!got[4].contains("to edit"), "\n{}", got.join("\n"));
     // The picked one's cap is lit: its own ground, not the others'.
     let mut o = opts(80, n.clone());
     o.selected = needs_ref("reply", "wait for CI");

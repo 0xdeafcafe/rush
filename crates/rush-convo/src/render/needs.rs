@@ -53,6 +53,21 @@ pub fn needs_choices(n: &Needs) -> Vec<&str> {
         .collect()
 }
 
+/// The kind of needs_ref of the row under the section's commands: a
+/// click there, or enter on it, asks the agent to run them, for when
+/// it can as well as you. Its text is the commands, one to a line.
+/// Rust-only.
+pub const NEEDS_RUN: &str = "agentrun";
+
+/// What the row that asks the agent to run the section's commands says.
+fn run_for_me(cmds: usize) -> &'static str {
+    if cmds == 1 {
+        "run it for me"
+    } else {
+        "run them for me"
+    }
+}
+
 /// A key's cap, as the cards draw it: " 1 " on its own ground, lit when
 /// its row is the one picked.
 const CAP_BG: Color = Color::Rgb(48, 44, 40);
@@ -81,12 +96,12 @@ pub const NEEDS_ALL: &str = "all";
 /// of the answer, so not part of what a selection copies.
 const HINTS: [&str; 7] = [
     "click copies",
-    "click to reply",
+    "click sends",
     "click opens",
     "click copies all commands",
     "type your own answer below",
     "enter",
-    "puts it in your box",
+    "sends it",
 ];
 
 /// The marks that lead a row of the section.
@@ -215,7 +230,12 @@ impl Drawer<'_> {
         let l = pad().and(paint(frame, "╭")).and_raw(" ").and(head);
         self.add(&all_ref, Color::Default, l, all_hint);
         let mut rows: Vec<(String, Txt, Txt)> = Vec::new();
-        for it in &n.items {
+        // Under the last command, a row that asks the agent to run them.
+        let last_cmd = n.items.iter().rposition(|it| it.kind == "run");
+        for (at, it) in n.items.iter().enumerate() {
+            if at > 0 && Some(at - 1) == last_cmd {
+                rows.push(self.agent_run_row(&cmds));
+            }
             if it.kind == "reply" {
                 rows.extend(self.choice_rows(&n, it, w));
                 continue;
@@ -237,7 +257,7 @@ impl Drawer<'_> {
                 "reply" => (
                     paint(C_BLUE, "↩"),
                     C_TEXT,
-                    "click to reply",
+                    "click sends",
                     needs_ref(&it.kind, &it.text),
                 ),
                 "link" => (
@@ -269,6 +289,9 @@ impl Drawer<'_> {
                 rows.push((r.clone(), l.and(r_), right));
             }
         }
+        if last_cmd.is_some_and(|at| at + 1 == n.items.len()) {
+            rows.push(self.agent_run_row(&cmds));
+        }
         // The last row closes the frame.
         let last = rows.len().saturating_sub(1);
         if rows.is_empty() {
@@ -284,11 +307,33 @@ impl Drawer<'_> {
 }
 
 impl Drawer<'_> {
+    /// The row under the section's commands that asks the agent to run
+    /// them: picked, it says what enter does.
+    fn agent_run_row(&self, cmds: &[&str]) -> (String, Txt, Txt) {
+        let r = needs_ref(NEEDS_RUN, &cmds.join("\n"));
+        let on = self.o.selected == r;
+        let words = run_for_me(cmds.len());
+        let words = if on {
+            paint(C_WHITE.bold(), words)
+        } else {
+            paint(C_TEXT, words)
+        };
+        let left = paint(C_BLUE, "↩").and_raw(" ").and(words);
+        let right = if on {
+            key_hint("enter", "sends it").and_raw("  ")
+        } else {
+            dim("click sends").and_raw("  ")
+        };
+        (r, left, right)
+    }
+
     /// A reply of the section as a choice, the way a question's card lays
     /// its options out: its key (1, 2…) on a cap, then the reply, wrapped
     /// under itself; the last reply has the row for your own words under
-    /// it. The row picked has its cap lit and says what enter does; a
-    /// click, enter or its key puts the reply in your message box.
+    /// it. The row picked has its cap lit and says what enter does: a
+    /// click or enter sends the reply, and its key puts it in your
+    /// message box to change first (Rust-only: Go put it in the box for
+    /// all three, a second step that read as nothing having happened).
     fn choice_rows(&self, n: &Needs, it: &NeedsItem, w: usize) -> Vec<(String, Txt, Txt)> {
         let all = needs_choices(n);
         let at = n
@@ -314,9 +359,9 @@ impl Drawer<'_> {
         {
             let (left, right) = if k == 0 {
                 let right = if on {
-                    key_hint("enter", "puts it in your box").and_raw("  ")
+                    key_hint("enter", "sends it").and_raw("  ")
                 } else {
-                    dim("click to reply").and_raw("  ")
+                    dim("click sends").and_raw("  ")
                 };
                 (cap.clone().and_raw(" ").and(l), right)
             } else {
@@ -343,7 +388,7 @@ impl Drawer<'_> {
             } else if sel.starts_with("needs:") {
                 Txt::new()
             } else {
-                dim(&format!("↑ then {keys} picks")).and_raw("  ")
+                dim(&format!("↑ then {keys} to edit")).and_raw("  ")
             };
             out.push((r, left, right));
         }

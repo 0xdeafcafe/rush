@@ -55,7 +55,7 @@ pub use tools::{Progress, progress, progress_any};
 pub use udiff::clean_output;
 
 // The Needs-you section's replies as choices.
-pub use needs::{NEEDS_OWN, needs_choices};
+pub use needs::{NEEDS_OWN, NEEDS_RUN, needs_choices};
 
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
 /// as one line: a run with no colour of its own takes base's (Go's
