@@ -435,6 +435,8 @@ impl Model {
         let narrow = self.w < crate::header::NARROW;
         let (places_y, pages_y) = if narrow {
             (2, self.top_h() - 2)
+        } else if self.compact() {
+            (0, 0) // one row: header_text keeps the two apart
         } else {
             (self.text_at() + 1, self.text_at() + 2)
         };

@@ -3946,6 +3946,16 @@ is made. Everything below is in `rush_ui::frame`.
   an agent reading any account's, a session's billing and its host's
   rush version (no Info for them), the name's @handle, headerGit, the
   hover on the label and its click to switch.
+- **The header with a conversation open** (`header.rs` `compact`).
+  Rust-only: one row and no rule, where Go's is clanker's six rows
+  wherever you are. It holds rush's name, the counts, the places, the
+  pages after them and, at the right, the account new agents start on;
+  clanker, the machine's readings and a top bar of your own are the
+  list's. The counts lose their words before the account goes. The
+  places and the pages share row 0, so `header_text` keeps the pages'
+  part with the places' blanked: a page may have a place's name
+  (Agents). A newer rush is its key alone, as on a small screen, and
+  isn't clicked there.
 - **clanker's reactions** (`clanker.rs`). What `session_core::finish`
   keeps (`Finish.fx`) is drawn on him as Go's clkFX: drawing the header
   moves the reaction on a frame for every 70 ms gone and asks for a wake

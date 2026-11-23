@@ -71,6 +71,78 @@ impl Model {
         clanker::draw_fx(md, self.tick, t.today >= 500.0, clanker::reaction(self))
     }
 
+    /// With a conversation open the header is one row, no rule under it: the
+    /// counts, the places, the pages and the account new agents start on,
+    /// so the conversation has the rows clanker and the machine's
+    /// readings took. Rust-only: Go's header is as tall wherever you are.
+    pub fn compact(&self) -> bool {
+        self.w >= NARROW && self.session.is_some() && !self.on_place()
+    }
+
+    /// The header as one row (see `compact`). The places' and the pages'
+    /// parts are kept apart for clicks: both are on row 0, and a page may
+    /// have a place's name.
+    fn compact_header(&mut self) -> Vec<Line> {
+        let w = self.w;
+        let t = self.tally();
+        let tb = self.ext.top_bar;
+        let account = tb
+            .and_then(|tb| (tb.gauges)(self))
+            .map(|g| g.account)
+            .filter(|a| a.width() > 0)
+            .unwrap_or_else(|| self.acct());
+        // A newer rush, its key alone, as on a small screen.
+        let notice = self.update_notice().map(|n| {
+            let c = n.spans.first().map_or(ORANGE, |s| s.style.fg);
+            line([sp(format!("↑ {}", self.update_key()), c)])
+        });
+        self.note_update_notice(0, "");
+        let tabs = self.tabs();
+        let left_of = |m: &Self, short: bool| {
+            let mut l = line([
+                plain("  "),
+                Span::new("rush", Style::fg(TEXT).bold().italic()),
+            ]);
+            for c in notice.iter().cloned().chain(m.counts(t, short)) {
+                l.spans.push(plain("   "));
+                join(&mut l, c);
+            }
+            l.spans.push(plain("   "));
+            for (i, tab) in tabs.iter().enumerate() {
+                if i > 0 {
+                    l.spans.push(plain(" "));
+                }
+                join(&mut l, tab.clone());
+            }
+            l
+        };
+        let right_w = account.width() + 5;
+        let mut left = left_of(self, false);
+        if left.width() + right_w > w {
+            left = left_of(self, true);
+        }
+        let places = left.plain();
+        let places_w = left.width();
+        let room = w.saturating_sub(places_w + 3 + right_w);
+        let pages = self.pages_line(room);
+        if pages.width() > 0 {
+            left.spans.push(plain("   "));
+            join(&mut left, pages);
+        }
+        let row = if left.width() + right_w <= w {
+            spread(left, account, w)
+        } else {
+            fit(left, w)
+        };
+        let all = row.plain();
+        let rest = all.get(places.len()..).unwrap_or("");
+        self.header_text = [places, format!("{}{rest}", blanks(places_w))];
+        if let Some(tb) = tb {
+            (tb.dropped)(self, Drops::new());
+        }
+        vec![row]
+    }
+
     /// The rows above the body: the header and a rule. With clanker the
     /// header is as tall as he is and the three rows of text (the counts,
     /// the places, the pages) sit beside him from his head down
@@ -79,6 +151,8 @@ impl Model {
     pub fn top_h(&self) -> usize {
         if self.w < NARROW {
             5
+        } else if self.compact() {
+            1
         } else if self.cfg.hide_logo {
             TEXT_ROWS + 1
         } else {
@@ -89,7 +163,7 @@ impl Model {
     /// The header row the first of the two rows of text is on: level with
     /// clanker's head, the second beside his body.
     pub fn text_at(&self) -> usize {
-        if self.w < NARROW || self.cfg.hide_logo {
+        if self.w < NARROW || self.cfg.hide_logo || self.compact() {
             0
         } else {
             TEXT_AT
@@ -318,6 +392,9 @@ impl Model {
             }
             self.note_update_notice(0, "");
             return self.narrow_header(md, counts);
+        }
+        if self.compact() {
+            return self.compact_header();
         }
         let (text_rows, text, drops) = self.head_rows(w);
         if let Some(tb) = self.ext.top_bar {
