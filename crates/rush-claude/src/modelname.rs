@@ -13,7 +13,14 @@ static MODEL_ID: LazyLock<Regex> = LazyLock::new(|| {
 
 /// How a model is shown: "Opus 5.5" for claude-opus-5-5[1m], a display
 /// name without its "(1M context)".
+///
+/// Not Go's: an alias Claude Code takes for --model ("fable",
+/// "opus[1m]") is named as the model it runs now, "Fable 5.2", so a
+/// session's header, the model picker and its usage say one name for one
+/// model. Go said "Fable" for the alias and "Fable 5.2" for the id.
 pub fn model_name(s: &str) -> String {
+    let full = crate::pricing::alias(s.strip_suffix("[1m]").unwrap_or(s));
+    let s = full.unwrap_or(s);
     if let Some(m) = MODEL_ID.captures(s) {
         let mut v = m[2].to_string();
         if let Some(minor) = m.get(3) {
@@ -55,8 +62,12 @@ mod tests {
         for (input, want) in [
             ("claude-opus-5-5[1m]", "Opus 5.5"),
             ("claude-sonnet-5", "Sonnet 5"),
-            ("opus", "Opus"),
-            ("opus[1m]", "Opus"),
+            // An alias is the model it runs now (not Go's "Opus").
+            ("opus", "Opus 5.5"),
+            ("opus[1m]", "Opus 5.5"),
+            ("fable", "Fable 5.2"),
+            ("claude-fable-5-2", "Fable 5.2"),
+            ("best", "Best"),
             ("Opus 4.1 (1M context)", "Opus 4.1"),
             ("gpt-5-codex", "gpt-5-codex"),
             ("claude-haiku-4-5-20251001", "Haiku 4.5"),

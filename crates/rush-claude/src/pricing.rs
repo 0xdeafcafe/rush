@@ -45,7 +45,7 @@ const PRICES: &[(&str, Price)] = &[
 
 /// The models Claude Code's --model aliases run now; by hand, moved when
 /// Claude Code's aliases move.
-fn alias(m: &str) -> Option<&'static str> {
+pub(crate) fn alias(m: &str) -> Option<&'static str> {
     Some(match m {
         "opus" => "claude-opus-5-5",
         "sonnet" => "claude-sonnet-5-5",

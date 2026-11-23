@@ -1,5 +1,6 @@
 //! The New session sheet (⌥m, shift+tab in the box): the harness that
-//! leads the chat, then a model it may call. A chat has one leader
+//! leads the chat, then a model it may call, then (Rust-only) the effort
+//! it thinks with, where its harness takes one. A chat has one leader
 //! harness, and it controls the models: the list is its row of Settings ›
 //! Config, every provider it runs and the models each may call there. It
 //! changes no default: Settings does. After Go's internal/ui/newsheet.go
@@ -44,8 +45,10 @@ struct Hit {
 }
 
 pub struct NewSheet {
-    /// 0 the harness, 1 the model.
+    /// 0 the harness, 1 the model, 2 the effort (Rust-only).
     pub row: usize,
+    /// The effort chosen; "" as Settings has it for the route.
+    pub effort: String,
     /// The leader.
     pub harness: Kind,
     /// The model chosen.
@@ -80,6 +83,7 @@ pub fn open_composer(m: &mut Model) -> Out {
         sel: 0,
         filter: String::new(),
         hits: Vec::new(),
+        effort: String::new(),
     };
     if !leaders.contains(&s.harness) {
         s.harness = leaders[0].clone();
@@ -250,7 +254,35 @@ impl NewSheet {
         if !self.pick.model.is_empty() {
             o.model = self.pick.model.clone();
         }
+        if !self.effort.is_empty() && self.efforts(m, &o.kind).contains(&self.effort) {
+            o.effort = self.effort.clone();
+        }
         o
+    }
+
+    /// The efforts the route's harness takes, "" (as Settings has it)
+    /// first; empty when it takes none, and the row isn't shown. Rust-only:
+    /// Go's sheet had no effort, which was Settings' alone.
+    fn efforts(&self, m: &Model, kind: &str) -> Vec<String> {
+        let ids: Vec<String> = super::setup::efforts_of(&m.reg, kind)
+            .into_iter()
+            .map(|c| c.id)
+            .filter(|id| !id.is_empty())
+            .collect();
+        if ids.is_empty() {
+            return ids;
+        }
+        std::iter::once(String::new()).chain(ids).collect()
+    }
+
+    /// The rows the sheet has now: the effort's only when there are some.
+    fn rows(&self, m: &Model) -> usize {
+        let (k, _, _) = m.reg.compat(&self.pick.id, self.harness.as_str());
+        if self.efforts(m, k.as_str()).is_empty() {
+            2
+        } else {
+            3
+        }
     }
 
     /// The list's lines that match what's typed (shown).
@@ -385,7 +417,7 @@ impl Sheet for NewSheet {
         let mut out = vec![
             sheet_title(
                 "New session",
-                "the harness that leads it, and a model it may call · Settings stay as they are",
+                "the harness that leads it, a model it may call, and its effort · Settings stay as they are",
                 w,
             ),
             Line::new(),
@@ -428,6 +460,39 @@ impl Sheet for NewSheet {
         let mut l = line([sp(fit_str("model", 10), DIM)]);
         join(&mut l, model);
         out.push(sheet_row(l, self.row == 1 && !self.open, w));
+        // The effort it thinks with, where its harness takes one.
+        let efforts = self.efforts(m, &k);
+        if efforts.is_empty() {
+            self.row = self.row.min(1);
+        } else {
+            let picked = efforts.contains(&self.effort) && !self.effort.is_empty();
+            let mut e = line([sp("‹ ", FAINT)]);
+            if picked {
+                e.spans.push(spb(self.effort.clone(), TEXT));
+            } else {
+                // What Settings gives the route, said as what it is.
+                let (ck, _, _) = reg.compat(&self.pick.id, self.harness.as_str());
+                let set = start_on(m, &self.pick.id, ck.as_str()).effort;
+                let word = if set.is_empty() {
+                    "default".to_string()
+                } else {
+                    set
+                };
+                e.spans.push(spb(word, TEXT));
+            }
+            e.spans.push(sp(" ›", FAINT));
+            if !picked {
+                e.spans.push(sp("  as Settings has it", DIM));
+            }
+            self.hits.push(Hit {
+                y: out.len(),
+                row: 2,
+                pick: None,
+            });
+            let mut l = line([sp(fit_str("effort", 10), DIM)]);
+            join(&mut l, e);
+            out.push(sheet_row(l, self.row == 2 && !self.open, w));
+        }
 
         // Only when it matters: what this one can't do.
         let cant: Vec<&str> = CANT
@@ -518,10 +583,27 @@ impl Sheet for NewSheet {
         }
         match k.s.as_str() {
             "esc" | "ctrl+c" => return Out::Close,
-            "up" | "down" | "tab" | "shift+tab" => self.row = 1 - self.row,
+            "up" | "shift+tab" => {
+                let n = self.rows(m);
+                self.row = round_move(self.row.min(n - 1), -1, n);
+            }
+            "down" | "tab" => {
+                let n = self.rows(m);
+                self.row = round_move(self.row.min(n - 1), 1, n);
+            }
             "left" | "right" => {
                 if self.row == 1 {
                     self.open_list(m);
+                    return Out::Draw;
+                }
+                if self.row == 2 {
+                    let (kind, _, _) = m.reg.compat(&self.pick.id, self.harness.as_str());
+                    let efforts = self.efforts(m, kind.as_str());
+                    let i = efforts.iter().position(|e| *e == self.effort).unwrap_or(0);
+                    let d = if k.s == "left" { -1 } else { 1 };
+                    if let Some(e) = efforts.get(round_move(i, d, efforts.len())) {
+                        self.effort = e.clone();
+                    }
                     return Out::Draw;
                 }
                 let leaders = leaders(m);

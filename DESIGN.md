@@ -3168,6 +3168,24 @@ own adapter, `read_history`), again only once their file grows: their
 steps and replies go under the step that ran them, and Changes takes
 their edits.
 
+### One name for a model, and a new session's effort (Rust-only)
+
+A Claude alias (`fable`, `opus[1m]`) is named as the model it runs now:
+`rush_claude::modelname::model_name` reads `pricing::alias` first, so
+"fable" is "Fable 5.2" wherever the agent's namer is asked
+(`Registry::model_name`, `look::model_word`). Go said "Fable" for the
+alias and "Fable 5.2" for the id, and the session's status row said
+"fable 5.2" (PrettyModel) over a `/model` list of bare ids. The status
+row's model now asks the namer too (its `· 1M` kept), and `/model`'s
+rows say the name before their note (`rushcmd::named`). The other
+`pretty_model` copies (the overview, the account's usage, the opening
+card) still say ids their own way.
+
+The New session sheet (shift+tab in the box, `newsheet.rs`) has a third
+row, effort, where the route's harness takes one: ←→ go round its
+efforts, the first "as Settings has it", and what's picked goes out as
+`StartOver.effort` for that one session.
+
 ### A long Changes list (Rust-only)
 
 Go lists every file a session changed in the order it first touched

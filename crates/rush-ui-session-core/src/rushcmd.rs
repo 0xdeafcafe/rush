@@ -334,7 +334,10 @@ pub fn open_choices(m: &mut Model, key: &str, name: &str) -> bool {
     };
     let run = running(m, key, name);
     let picked = conn(m, key).picked.get(name).cloned();
-    let (rows, now) = choices::choice_rows(&opts, &run, picked.as_deref());
+    let (mut rows, now) = choices::choice_rows(&opts, &run, picked.as_deref());
+    if name == "model" {
+        rows = rows.into_iter().map(|r| named(m, &kind, r)).collect();
+    }
     let (k, n) = (key.to_string(), name.to_string());
     let mut inner = ChoiceSheet::new(
         name,
@@ -378,6 +381,24 @@ const ABOUT: &str = "for this session, from the next turn";
 /// /model or /effort with nothing named (choiceSheet): the frame's list,
 /// with the models the agent lists added as they're read, and what it's
 /// for said as the session is now.
+/// A model's row with the name its agent says it by before its note,
+/// when its id isn't that: "fable" is "Fable 5.2", as the session's header
+/// says the model it runs (Rust-only: Go listed the bare id).
+fn named(m: &Model, kind: &str, mut r: Row) -> Row {
+    if r.id.is_empty() {
+        return r;
+    }
+    let name = crate::look::model_word(&m.reg, kind, &r.id);
+    if name != r.id && !r.note.contains(&name) {
+        r.note = if r.note.is_empty() {
+            name
+        } else {
+            format!("{name} · {}", r.note)
+        };
+    }
+    r
+}
+
 pub struct ArgSheet {
     pub conn: String,
     pub kind: String,
@@ -393,10 +414,11 @@ impl Sheet for ArgSheet {
         if self.inner.name == "model" {
             for o in setup::models(m, &self.kind) {
                 if !self.inner.opts.iter().any(|r| r.id == o.id) {
-                    self.inner.opts.push(Row {
+                    let row = Row {
                         id: o.id,
                         note: o.note,
-                    });
+                    };
+                    self.inner.opts.push(named(m, &self.kind, row));
                 }
             }
         }

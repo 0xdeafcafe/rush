@@ -261,7 +261,16 @@ pub static SEGS: &[Seg] = &[
             if md.is_empty() {
                 return Line::new();
             }
-            one(dim(pretty_model(md)))
+            // As the model picker and the agent's own namer say it
+            // ("Fable 5.2"), its long window after it as before
+            // (Rust-only: Go's PrettyModel said "fable 5.2" here).
+            let mut word = model_word(&x.m.reg, of(x).a.kind.as_str(), md);
+            if word == md {
+                word = pretty_model(md);
+            } else if md.contains("[1m]") {
+                word.push_str(" · 1M");
+            }
+            one(dim(word))
         },
     },
     Seg {
