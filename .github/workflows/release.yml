@@ -1,6 +1,6 @@
 name: Release
 
-# Builds rush (the `rush` crate) for Macs with Apple silicon and for Linux
+# Builds rush (the `rush` crate) for Macs (Apple silicon and Intel) and for Linux
 # (x86_64 and arm64, glibc), and publishes it: a rolling `nightly` prerelease every night main changed (or
 # by hand), and on a v* tag a GitHub release plus the Homebrew formula in
 # 0xdeafcafe/homebrew-tap (brew install 0xdeafcafe/tap/rush).
@@ -77,6 +77,9 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
+            os: macos-latest
+          # Built on the Apple silicon runner; the version check runs it under Rosetta.
+          - target: x86_64-apple-darwin
             os: macos-latest
           # The oldest Ubuntu runner, so the binary links against glibc 2.35
           # and runs on Debian 12 and Ubuntu 22.04 and newer.
