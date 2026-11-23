@@ -269,7 +269,9 @@ pub fn key(m: &mut Model, key: &str, s: &str) -> Out {
         "space" | " " | "e" => {
             let c = conn(m, key);
             if !c.input.is_empty() {
-                m.flash("Finish or stash your message before editing the queue");
+                // Not Go's "Finish or stash your message…": the box's
+                // words for what can be done with what's typed.
+                m.flash("send, clear or set aside what's typed first, then edit the queue");
                 return Out::Draw;
             }
             // Edited in the box; enter there saves it back in place. The

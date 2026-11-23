@@ -47,4 +47,4 @@
 ╭─ new agent in checkout ──────────────────────────────╮│  ╭─ open in a terminal, so it can't take messages here ─────────────────────────────────────────────────────────────────────────╮
 │ ❯ describe a task                                    ││  │ ❯ enter or → to talk to this agent                                                                                           │
 ╰──────────────────────────────────────────────────────╯│  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  enter open  ·  ctrl+o reply  ·  ? more                │    enter · → type here  ·  ctrl+n next needing you
+  enter open  ·  ctrl+o reply  ·  f1 more               │    enter · → type here  ·  ctrl+n next needing you

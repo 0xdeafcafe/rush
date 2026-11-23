@@ -52,12 +52,15 @@ pub struct Words {
 /// The names it can go by; the first is the default.
 pub const CALLED: [&str; 2] = ["Stash", "Drafts"];
 
+/// Named Stash, it says what happens to your text: "set aside", the
+/// words rush's keys already use (Not Go's: "stash", "stashed", "your
+/// stash", which named the mechanism).
 const STASH: Words = Words {
     title: "Stash",
-    tab: "Stashed",
-    verb: "stash",
-    did: "stashed",
-    noun: "stash",
+    tab: "Set aside",
+    verb: "set aside",
+    did: "set aside",
+    noun: "message set aside",
 };
 
 const DRAFTS: Words = Words {
@@ -286,7 +289,7 @@ impl Book {
                     text_box: st.text_box,
                     if_text: b.text,
                 }),
-                said: self.said("your {noun} is back in the box"),
+                said: self.said("what you {did} is back in the box"),
             },
             (false, None) => {
                 let if_text = b.text.clone();
@@ -299,9 +302,12 @@ impl Book {
                     },
                 );
                 self.s.boxes.remove(key);
-                // The Prompt's stash key is the list's own once it's empty.
+                // The Prompt's stash key is the list's own once it's
+                // empty: there #stash, the history, has it. Not Go's
+                // "{history} › {tab} has it", which named a key and a tab
+                // and not what they do.
                 let again = if key.is_empty() {
-                    "{history} › {tab} has it"
+                    "{history} brings it back now"
                 } else {
                     "{aside} brings it back now"
                 };
@@ -311,7 +317,9 @@ impl Book {
                         text_box: TextBox::default(),
                         if_text,
                     }),
-                    said: self.said(&format!("{{did}} · it comes back after you send · {again}")),
+                    said: self.said(&format!(
+                        "{{did}} · back in the box after you send · {again}"
+                    )),
                 }
             }
             (false, Some(st)) => {
@@ -331,7 +339,7 @@ impl Book {
                         if_text,
                     }),
                     said: self.said(
-                        "{did} this one, and your other {noun} is back · {aside} swaps them again",
+                        "{did} this one, and what you {did} before is back · {aside} swaps them again",
                     ),
                 }
             }
@@ -376,7 +384,8 @@ impl Book {
         let mut said = String::new();
         if !empty(cur) {
             self.add(REPLACED, key, name, cur.clone(), now);
-            said = "put back · what the box held is under {history} › Replaced".into();
+            // Not Go's "is under {history} › Replaced".
+            said = "put back · what the box held is in {history}, under Replaced".into();
         }
         Some((
             Set {
@@ -569,6 +578,77 @@ mod tests {
         boxed(s)
     }
 
+    /// What the stash key says, in each name's words: where the text went
+    /// and the one key that brings it back.
+    #[test]
+    fn what_the_stash_key_says() {
+        // (called, box, typed before, then typed, said)
+        let cases: &[(&str, &str, &str, &str, &str)] = &[
+            (
+                "Stash",
+                "s1",
+                "",
+                "one",
+                "set aside · back in the box after you send · {aside} brings it back now",
+            ),
+            (
+                "Stash",
+                "",
+                "",
+                "one",
+                "set aside · back in the box after you send · {history} brings it back now",
+            ),
+            (
+                "Stash",
+                "s1",
+                "one",
+                "",
+                "what you set aside is back in the box",
+            ),
+            (
+                "Stash",
+                "s1",
+                "one",
+                "two",
+                "set aside this one, and what you set aside before is back · {aside} swaps them again",
+            ),
+            (
+                "Drafts",
+                "s1",
+                "",
+                "one",
+                "kept as a draft · back in the box after you send · {aside} brings it back now",
+            ),
+            (
+                "Drafts",
+                "s1",
+                "one",
+                "",
+                "what you kept as a draft is back in the box",
+            ),
+            (
+                "Stash",
+                "s1",
+                "",
+                "",
+                "nothing to set aside · type a message first",
+            ),
+        ];
+        for (called, key, before, typed, want) in cases {
+            let mut bk = Book::new(Store::default(), 0);
+            bk.w = words_for(called);
+            if !before.is_empty() {
+                bk.stash(key, "one", b(before), t0());
+            }
+            let r = bk.stash(key, "one", b(typed), t0());
+            assert_eq!(r.said, *want, "{called} {key:?} {before:?} {typed:?}");
+        }
+        assert_eq!(
+            words_for("").fill("{tab} · {did} · back after you send"),
+            "Set aside · set aside · back after you send"
+        );
+    }
+
     // book_test.go TestBoxKeptUntilSent: a box is kept until it's sent,
     // and comes back into an empty box.
     #[test]
@@ -721,7 +801,7 @@ mod tests {
         }
         let p = bk.pick("s1", t0());
         assert!(
-            p.tabs[0] == "Stashed" && p.tabs[3] == "Replaced",
+            p.tabs[0] == "Set aside" && p.tabs[3] == "Replaced",
             "tabs {:?}",
             p.tabs
         );

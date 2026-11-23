@@ -258,72 +258,185 @@ fn send_modes_follow_what_the_agent_can() {
     );
 }
 
-/// boxKeys: what the hint row offers, state by state.
+/// boxKeys: what the hint row offers, state by state: what enter does,
+/// then at most two keys, the most useful now first; esc says what it
+/// does now.
 #[test]
 fn box_keys_table() {
-    let st = |live, working, typed, queued, ways, mode, cleared| BoxState {
-        live,
-        working,
-        typed,
-        queued,
-        mode,
-        ways,
-        cleared,
-    };
     use SendMode::*;
-    let cases: &[(BoxState, &[(&str, &str)])] = &[
-        (st(false, false, false, false, true, Queue, false), &[]),
+    let idle = BoxState::default();
+    let typed = BoxState {
+        typed: true,
+        ..idle
+    };
+    let live = BoxState {
+        live: true,
+        working: true,
+        ways: true,
+        esc_stops: true,
+        ..idle
+    };
+    let on = |b: BoxState| BoxState {
+        aside: "set aside",
+        aside_did: "set aside",
+        ..b
+    };
+    let cases: &[(&str, BoxState, &[(&str, &str)], &str)] = &[
+        ("empty, idle", idle, &[], "back"),
+        ("typed, idle", typed, &[("enter", "send")], "clear"),
         (
-            st(false, false, true, false, true, Queue, false),
-            &[("enter", "send")],
+            "typed, idle, stash on",
+            on(typed),
+            &[
+                ("enter", "send"),
+                ("ctrl+p", "set aside"),
+                ("ctrl+r", "history"),
+            ],
+            "clear",
         ),
         (
-            st(false, false, false, true, true, Queue, false),
+            "empty, stash on",
+            on(idle),
+            &[("ctrl+r", "history")],
+            "back",
+        ),
+        (
+            "empty, something set aside",
+            on(BoxState {
+                has_aside: true,
+                ..idle
+            }),
+            &[
+                ("ctrl+p", "bring back what you set aside"),
+                ("ctrl+r", "history"),
+            ],
+            "back",
+        ),
+        (
+            "empty, cleared, something set aside",
+            on(BoxState {
+                cleared: true,
+                has_aside: true,
+                ..idle
+            }),
+            &[
+                ("cmd+z or ctrl+/", "bring back what you cleared"),
+                ("ctrl+p", "bring back what you set aside"),
+            ],
+            "back",
+        ),
+        (
+            "empty, cleared",
+            BoxState {
+                cleared: true,
+                ..idle
+            },
+            &[("cmd+z or ctrl+/", "bring back what you cleared")],
+            "back",
+        ),
+        (
+            "empty, queued",
+            BoxState {
+                queued: true,
+                ..idle
+            },
             &[("ctrl+enter", "send the queue now")],
+            "back",
         ),
+        // Working, not hosted: enter queues, esc can't stop it, ctrl+x can.
         (
-            st(false, true, true, false, true, Queue, false),
+            "typed, working",
+            BoxState {
+                working: true,
+                typed: true,
+                ..idle
+            },
             &[
                 ("enter", "queue it"),
                 ("ctrl+enter", "send now"),
                 ("ctrl+x", "stop it"),
             ],
+            "clear",
         ),
         (
-            st(true, true, true, false, true, Guide, false),
+            "empty, working",
+            BoxState {
+                working: true,
+                ..idle
+            },
+            &[("ctrl+x", "stop it")],
+            "back",
+        ),
+        (
+            "typed, live, guide",
+            BoxState {
+                typed: true,
+                mode: Guide,
+                ..live
+            },
             &[
                 ("enter", "guide it"),
                 ("ctrl+enter", "send now"),
                 ("ctrl+t", "what enter does while it works"),
-                ("ctrl+x", "stop it"),
             ],
+            "clear",
         ),
         (
-            st(true, true, true, false, true, Stop, false),
+            "typed, live, stop & send, stash on",
+            on(BoxState {
+                typed: true,
+                mode: Stop,
+                ..live
+            }),
             &[
                 ("enter", "stop & send"),
                 ("ctrl+enter", "send now"),
                 ("ctrl+t", "what enter does while it works"),
-                ("ctrl+x", "stop it"),
             ],
+            "clear",
         ),
         // An agent that only queues: no ctrl+t to say.
         (
-            st(true, true, true, false, false, Queue, false),
+            "typed, live, one way, stash on",
+            on(BoxState {
+                typed: true,
+                ways: false,
+                ..live
+            }),
             &[
                 ("enter", "queue it"),
                 ("ctrl+enter", "send now"),
-                ("ctrl+x", "stop it"),
+                ("ctrl+p", "set aside"),
             ],
+            "clear",
+        ),
+        // esc stops the turn, and says so: no ctrl+x beside it.
+        (
+            "empty, live",
+            live,
+            &[("ctrl+t", "what enter does while it works")],
+            "stop the turn",
         ),
         (
-            st(false, false, false, false, true, Queue, true),
-            &[("cmd+z or ctrl+/", "bring back what you cleared")],
+            "empty, live, queued",
+            BoxState {
+                queued: true,
+                ..live
+            },
+            &[
+                ("ctrl+enter", "send the queue now"),
+                ("ctrl+t", "what enter does while it works"),
+            ],
+            "stop the turn",
         ),
     ];
-    for (i, (s, want)) in cases.iter().enumerate() {
-        assert_eq!(sendmode::box_keys(s), *want, "case {i}");
+    for (name, s, want, esc) in cases {
+        let got = sendmode::box_keys(s);
+        let got: Vec<(&str, &str)> = got.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert_eq!(got, *want, "{name}");
+        assert_eq!(sendmode::esc_word(s, false), *esc, "{name}: esc");
     }
+    assert_eq!(sendmode::esc_word(&idle, true), "leave the box");
 }
 
 // ---- the box's keys (paneKey, sendPane) against the host's requests ----
@@ -1325,7 +1438,7 @@ fn queue_edit_in_the_box() {
     press(&mut m, "space");
     assert_eq!(
         flash(&m),
-        "Finish or stash your message before editing the queue"
+        "send, clear or set aside what's typed first, then edit the queue"
     );
 }
 
@@ -1535,7 +1648,7 @@ fn dock_frame_while_it_works() {
     assert!(f[n - 3].contains("❯ more"), "{f:?}");
     assert_eq!(
         f[n - 1].trim_end(),
-        "    enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc back"
+        "    enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc clear"
     );
 }
 
@@ -1596,17 +1709,17 @@ fn dock_keys_at_go_widths() {
         (
             "typed-live",
             80,
-            "enter queue it  ·  ctrl+enter send now  ·  esc back",
+            "enter queue it  ·  ctrl+enter send now  ·  esc clear",
         ),
         (
             "typed-live",
             100,
-            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  esc back",
+            "enter queue it  ·  ctrl+enter send now  ·  esc clear",
         ),
         (
             "typed-live",
             120,
-            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc back",
+            "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works  ·  f1 more  ·  esc clear",
         ),
         (
             "queue-picked",
@@ -1626,17 +1739,17 @@ fn dock_keys_at_go_widths() {
         (
             "working",
             80,
-            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ↑ rewind  ·  esc stop the turn",
         ),
         (
             "working",
             100,
-            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  ↑ rewind  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ↑ rewind  ·  f1 more  ·  esc stop the turn",
         ),
         (
             "working",
             120,
-            "ctrl+t what enter does while it works  ·  ctrl+x stop it  ·  ↑ rewind  ·  f1 more  ·  esc back",
+            "ctrl+t what enter does while it works  ·  ↑ rewind  ·  f1 more  ·  ⌥s conversation view  ·  esc stop the turn",
         ),
     ];
     for (st, w, keys) in want {

@@ -187,9 +187,10 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)",
         "<split|agent|list>",
     ),
+    // Not Go's "ctrl+s sets what's typed aside": ctrl+p does.
     (
         "stash",
-        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+s sets what's typed aside)",
+        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+p sets what's typed aside)",
         "",
     ),
     (

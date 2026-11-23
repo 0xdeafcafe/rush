@@ -2,6 +2,10 @@
 //!
 //! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3);
 //! voice.talk and session.take_view_suggestion are new in the Rust port.
+//! Not Go's titles: the undo, history and sendmode rows say it in the
+//! words the hints under the message boxes use ("history", "brings back
+//! what you cleared", "what enter does while it works"), so the keys
+//! guide agrees with them.
 
 use crate::{Action, Context};
 
@@ -79,7 +83,7 @@ const DEFAULTS: &[Row] = &[
     ("list.help", L, "the keys, with nothing typed", &["?"], false),
     ("list.editor", L, "write what's typed in your editor; with nothing typed, bring a Done agent back", &["ctrl+g"], false),
     ("list.image", L, "paste an image", &["ctrl+v", "super+v"], false),
-    ("list.undo", L, "undo in the Prompt", &["super+z", "ctrl+_", "ctrl+/"], false),
+    ("list.undo", L, "undo in the Prompt; brings back what you cleared", &["super+z", "ctrl+_", "ctrl+/"], false),
     ("list.redo", L, "redo in the Prompt", &["shift+super+z"], false),
     ("list.focus", L, "into the Session, and back", &["tab", "{", "}"], false),
     ("list.filter", L, "filter agents by name or what's said", &["ctrl+] f"], true),
@@ -90,7 +94,7 @@ const DEFAULTS: &[Row] = &[
     ("prompt.stash", P, "set what's typed aside; it comes back after you send", &["ctrl+p"], true),
     ("prompt.append", P, "add what's typed to the open agent's box", &["ctrl+] a"], true),
     ("prompt.replace", P, "put what's typed in the open agent's box, in place of its draft", &["ctrl+] o"], true),
-    ("prompt.history", P, "what you set aside, sent, cleared and replaced", &["ctrl+r"], true),
+    ("prompt.history", P, "history: what you set aside, sent, cleared and replaced", &["ctrl+r"], true),
 
     ("page.prev", Pg, "the page before", &["[", "shift+tab"], false),
     ("page.next", Pg, "the next page", &["]", "tab"], false),
@@ -116,7 +120,7 @@ const DEFAULTS: &[Row] = &[
     ("session.bottom", S, "back to the latest", &["end"], false),
     ("session.toggle", S, "open or close the selected row; type a space in the composer", &["space"], false),
     ("session.stash", S, "set what's typed aside, or bring it back; it comes back after you send", &["ctrl+p"], false),
-    ("session.history", S, "what you set aside, sent, cleared and replaced", &["ctrl+r"], false),
+    ("session.history", S, "history: what you set aside, sent, cleared and replaced", &["ctrl+r"], false),
     ("session.done", S, "stop the agent and put it away in Earlier, or bring it back", &["ctrl+d", "ctrl+] d"], false),
     ("session.hold", S, "hold or release the queue", &["ctrl+] h", "alt+h"], false),
     ("session.rewind", S, "rewind to the turn, or mark a file reviewed", &["ctrl+] r", "alt+r"], false),
@@ -146,7 +150,7 @@ const DEFAULTS: &[Row] = &[
     ("session.quickask.insert", S, "the quick ask's thread into the box, as one paste", &["ctrl+] i"], true),
     ("session.recall", S, "recall on and off: a cheap model's notes on the open chat, at the foot of the list", &["ctrl+] z"], true),
     ("session.background", S, "background what the turn waits on", &["ctrl+] j"], true),
-    ("session.sendmode", S, "how enter sends: queue, guide, or stop and send while it works", &["ctrl+t"], false),
+    ("session.sendmode", S, "what enter does while it works: queue, guide, or stop and send", &["ctrl+t"], false),
     ("session.mode", S, "choose session permissions", &["ctrl+] p"], true),
     ("session.setup", S, "choose this session’s model, effort and harness", &["shift+tab"], true),
     ("session.start", S, "pick the next session's agent, model and effort, or merge the queued message", &["ctrl+] m", "alt+m"], false),
@@ -167,7 +171,7 @@ const DEFAULTS: &[Row] = &[
     ("session.column.more", S, "more of the screen for the column beside the conversation, with nothing typed", &["alt+right", "ctrl+right"], false),
     ("session.editor", S, "write what's typed in your editor; with nothing typed, bring a Done agent back", &["ctrl+g"], false),
     ("session.image", S, "paste an image", &["ctrl+v", "super+v"], false),
-    ("session.undo", S, "undo in the box", &["super+z", "ctrl+_", "ctrl+/"], false),
+    ("session.undo", S, "undo in the box; brings back what you cleared", &["super+z", "ctrl+_", "ctrl+/"], false),
     ("session.redo", S, "redo in the box", &["shift+super+z", "ctrl+y"], false),
     ("session.focus", S, "back to Agents, and in again", &["tab", "{", "}"], false),
     ("session.help", S, "the keys, with nothing typed", &["?"], false),

@@ -193,6 +193,13 @@ impl Model {
         }
         match k.s.as_str() {
             "enter" if !self.input.is_empty() => return self.submit(),
+            // Something picked in the box: esc lets go of it first, as in
+            // a Session's box, and only the next clears (Not Go's, which
+            // cleared at once).
+            "esc" if self.input.selection().is_some() => {
+                self.input.anchor = None;
+                return Out::Draw;
+            }
             "esc" if !self.input.is_empty() => {
                 self.wipe_prompt();
                 return Out::Draw;

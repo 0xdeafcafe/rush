@@ -27,4 +27,4 @@
 ╭─ new agent in checkout ────────────────────────────────────────────╮
 │ ❯ describe a task                                                  │
 ╰────────────────────────────────────────────────────────────────────╯
-  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  f1 more

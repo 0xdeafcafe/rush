@@ -72,7 +72,7 @@ fn golden(name: &str, got: &str) {
     assert_eq!(got, want, "{name} drawn differently; got:\n{got}\n");
 }
 
-const NOTICE: &str = "◆ 1 decision waiting · alt+j answer · alt+shift+j stash and answer";
+const NOTICE: &str = "◆ 1 decision waiting · alt+j answer · alt+shift+j set aside and answer";
 
 /// Typing when the decision comes: no card, the keys stay in the box, and
 /// the box's edge says it waits.
@@ -163,14 +163,17 @@ fn stash_then_answer_puts_the_text_back() {
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "{s}");
     // No box under the card, but what it says of the text set aside.
-    assert!(s.contains("stashed · comes back after the decision"), "{s}");
+    assert!(
+        s.contains("set aside · comes back after the decision"),
+        "{s}"
+    );
     assert!(!s.contains("a message for this agent"), "{s}");
     // p takes the agent's picks and sends them.
     press(&mut m, "p");
     screen(&mut m);
     assert_eq!(input(&mut m), ("half a thought".into(), 11), "back");
     let s = screen(&mut m).join("\n");
-    assert!(!s.contains("stashed"), "{s}");
+    assert!(!s.contains("set aside ·"), "{s}");
 }
 
 /// Set aside unanswered, the card's text comes back too.

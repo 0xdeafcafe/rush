@@ -720,32 +720,70 @@ pub fn has_stash(m: &Model, key: &str) -> bool {
     })
 }
 
+/// Where a message that left a session's box went, as its flash says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Went {
+    /// To the agent, now.
+    Sent,
+    /// Into the turn under way, read at its next step.
+    Guided,
+    /// Into the queue, to go when the turn ends.
+    Queued,
+}
+
+/// The key the flash names for a queued message: ↑ from the empty box
+/// picks it, to change, send now or drop.
+pub const QUEUED_BACK: &str = "↑ picks it to change";
+
 /// A message gone from session key's box: the stash told, for its
-/// history, and the flash saying so, with the box's stash coming back
-/// into it if it has one (keepSent).
-pub fn keep_sent(m: &mut Model, key: &str, text: &str) {
+/// history, and the flash saying where it went and the one key that
+/// gets it back, with what was set aside coming back into the box if
+/// there was something (keepSent). Not Go's, which said "sent" of a
+/// message it had queued, and named the history for all three.
+pub fn keep_sent(m: &mut Model, key: &str, text: &str, went: Went) {
     let text = text.trim();
     if text.is_empty() {
         return;
     }
-    let did = if has_stash(m, key) {
-        format!("sent · your {} is back in the box", stash(m).0.noun)
-    } else {
-        "sent".to_string()
+    let mut did = match went {
+        Went::Sent => "sent".to_string(),
+        Went::Guided => "sent into the turn · it reads it at its next step".to_string(),
+        Went::Queued => "queued for when it's done".to_string(),
     };
+    if has_stash(m, key) {
+        did.push_str(&format!(
+            " · what you {} is back in the box",
+            stash(m).0.did
+        ));
+    }
     emit_box(m, rush_plugin::EV_INPUT_SENT, key, text);
-    let said = went_to(m, &did, "Sent");
+    let said = if went == Went::Queued {
+        format!("{did} · {QUEUED_BACK}")
+    } else {
+        went_to(m, &did, "Sent")
+    };
     m.flash(&said);
 }
 
+/// When the Agents box was last cleared, for the hint that brings it
+/// back (a Session's box keeps its own, Conn::cleared_at).
+#[derive(Default)]
+pub struct PromptCleared(pub i64);
+
 /// A box wiped: what was in it told to the stash for its history, and
-/// the flash saying how to bring it back (wipeBox's and wipePrompt's
-/// emitBox and flash). key is the session's, "" the Agents box's.
+/// the flash saying the one key that brings it back (wipeBox's and
+/// wipePrompt's emitBox and flash). key is the session's, "" the Agents
+/// box's. Not Go's, which named the history too: undo is the way back.
 pub fn cleared(m: &mut Model, key: &str, text: &str) {
     emit_box(m, rush_plugin::EV_INPUT_CLEARED, key, text);
-    let did = format!("cleared · {} brings it back", crate::style::UNDO_HINT);
-    let said = went_to(m, &did, "Cleared");
-    m.flash(&said);
+    if key.is_empty() {
+        let now = m.now;
+        m.kept::<PromptCleared>().0 = now;
+    }
+    m.flash(&format!(
+        "cleared · {} brings it back",
+        crate::style::UNDO_HINT
+    ));
 }
 
 /// What plugins put on the edge of a message box: a session's by its

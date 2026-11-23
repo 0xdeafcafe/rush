@@ -21,4 +21,4 @@
 ╭─│ ↑↓ choose  ·  enter change its keys  ·  tab next section  ·  esc close │  ─╮
 │ ╰────────────────────────────────────────────────────────────────────────╯   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  f1 more

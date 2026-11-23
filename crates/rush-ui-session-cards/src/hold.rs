@@ -124,9 +124,11 @@ pub fn stashed(m: &Model, key: &str) -> bool {
 /// What agent key's box says on its bottom edge of a decision held or
 /// its text set aside; empty for neither.
 pub fn notice(m: &mut Model, key: &str) -> Line {
+    // "set aside", the box's one word for text taken out to come back
+    // (was "stashed", "stash and answer").
     if stashed(m, key) {
         return line([
-            sp("stashed", ORANGE),
+            sp("set aside", ORANGE),
             sp(" · comes back after the decision", DIM),
         ]);
     }
@@ -138,7 +140,7 @@ pub fn notice(m: &mut Model, key: &str) -> Line {
     let stash = crate::keybind::bound_key(m, STASH_ANSWER);
     let what = if n == 1 { "decision" } else { "decisions" };
     let mut l = line([sp(format!("◆ {n} {what} waiting"), YELLOW)]);
-    for (k, w) in [(answer, "answer"), (stash, "stash and answer")] {
+    for (k, w) in [(answer, "answer"), (stash, "set aside and answer")] {
         if !k.is_empty() {
             l.spans.push(sp(format!(" · {k} {w}"), DIM));
         }

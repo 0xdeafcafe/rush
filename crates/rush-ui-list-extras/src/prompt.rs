@@ -526,12 +526,20 @@ pub fn hint(m: &Model, w: usize) -> Option<Line> {
     } else if super::rename::renaming(m).is_some() {
         super::rename::hint(w)
     } else if typing_hash(&text) {
-        keys_fit(w, &[("enter", "run it"), ("esc", "clear"), ("?", "guide")])
+        // f1, not Go's ?: with something typed ? is a letter.
+        keys_fit(w, &[("enter", "run it"), ("esc", "clear"), ("f1", "more")])
     } else if !text.is_empty() {
         let mut pairs = vec![
             ("enter".to_string(), "start".to_string()),
             ("shift+tab".to_string(), "model".to_string()),
         ];
+        // What's typed can be set aside while the stash runs, as in a
+        // Session's box (Rust-only: Go's row didn't say).
+        let (words, on) = rush_ui_plugin_ui::hooks::stash(m);
+        if on {
+            let (aside, _) = rush_ui_plugin_ui::hooks::stash_keys(m);
+            pairs.push((aside, words.verb.to_string()));
+        }
         // A repository's address typed: tab moves there, or clones it.
         match m
             .kept
@@ -549,12 +557,15 @@ pub fn hint(m: &Model, w: usize) -> Option<Line> {
         if let Some(fk) = folder_key(m, a) {
             pairs.push(fk);
         }
-        few_keys(w, 3, &pairs, &[("esc", "clear"), ("?", "more")])
+        few_keys(w, 3, &pairs, &[("esc", "clear"), ("f1", "more")])
     } else if super::peek::peeking(m) {
         super::peek::hint(m, w)
     } else {
         let mut pairs: Vec<(String, String)> = Vec::new();
         let p = |k: &str, v: &str| (k.to_string(), v.to_string());
+        // What left the box lately, and the key that brings it back
+        // first, as under a Session's box (Rust-only).
+        pairs.extend(brought_back(m));
         if let Some(i) = a {
             pairs.push(p("enter", "open"));
             if !m.agents[i].rush {
@@ -589,7 +600,9 @@ pub fn hint(m: &Model, w: usize) -> Option<Line> {
             let at = pairs.len().min(1);
             pairs.insert(at, v);
         }
-        pairs.push(p("?", "more"));
+        // f1, as under a Session's box: it opens the keys from anywhere,
+        // ? only with nothing typed (Not Go's "? more").
+        pairs.push(p("f1", "more"));
         let all: Vec<(&str, &str)> = pairs
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -599,4 +612,23 @@ pub fn hint(m: &Model, w: usize) -> Option<Line> {
     let mut l = line([plain("  ")]);
     join(&mut l, keys);
     Some(l)
+}
+
+/// The empty Agents box's way back to what left it: undo for what was
+/// cleared in the last two minutes, else, with something set aside, the
+/// history that has it (the list has ctrl+p and ctrl+r for itself then).
+fn brought_back(m: &Model) -> Option<(String, String)> {
+    let at = m
+        .kept
+        .peek::<rush_ui_plugin_ui::hooks::PromptCleared>()
+        .map_or(0, |c| c.0);
+    if at > 0 && m.now - at < 120_000 {
+        return Some((UNDO_HINT.into(), "bring back what you cleared".into()));
+    }
+    let (words, on) = rush_ui_plugin_ui::hooks::stash(m);
+    if on && rush_ui_plugin_ui::hooks::has_stash(m, "") {
+        let (_, history) = rush_ui_plugin_ui::hooks::stash_keys(m);
+        return Some((history, format!("bring back what you {}", words.did)));
+    }
+    None
 }

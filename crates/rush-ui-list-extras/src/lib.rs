@@ -113,10 +113,11 @@ pub fn register(x: &mut Ext) {
     // request and pin, how the list groups and splits, an image into the
     // box.
     x.list_keys.push(listkeys::key);
-    // #stash: what was set aside, sent, cleared and replaced.
+    // #stash: what was set aside, sent, cleared and replaced. Not Go's
+    // "ctrl+s sets what's typed aside": ctrl+p does.
     x.command(
         "stash",
-        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+s sets what's typed aside)",
+        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+p sets what's typed aside)",
         |m, _| stash::command(m, "history"),
     );
     // ⌥1…9: what the next session starts as, off the box's edge.

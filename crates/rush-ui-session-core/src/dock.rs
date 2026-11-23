@@ -1127,11 +1127,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let picked_mode = core(m).send_modes.get(key).copied();
     let rewinds = m.reg.supports(&kind, Feature::Rewind);
     let (words, stash_on) = rush_ui_plugin_ui::hooks::stash(m);
-    let has_stash = rush_ui_plugin_ui::hooks::has_stash(m, key);
+    let has_aside = rush_ui_plugin_ui::hooks::has_stash(m, key);
     let (aside, history) = rush_ui_plugin_ui::hooks::stash_keys(m);
-    let your_stash = format!("your {} back", words.noun);
-    let history_says = format!("{} · sent · cleared", words.tab.to_lowercase());
     let side_items = view == "conversation" && super::side::has_items(m, key);
+    let esc_stops = super::keys::can_interrupt(m, key);
+    let has_subs = view == "conversation" && !conn(m, key).runs.subs.is_empty();
     let c = conn(m, key);
     let live = c.hosted() && live_turn;
     let st = BoxState {
@@ -1142,25 +1142,33 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         mode: sendmode::mode_of(picked_mode, &modes),
         ways: modes.len() > 1,
         cleared: c.cleared_at > 0 && now - c.cleared_at < 120_000,
+        esc_stops,
+        aside: if stash_on { words.verb } else { "" },
+        aside_did: words.did,
+        has_aside,
     };
-    // The key that sends now is yours if you moved it (sendmode.go:110-116).
-    let mut pairs: Vec<(&str, &str)> = sendmode::box_keys(&st)
-        .into_iter()
-        .map(|(k, v)| (if k == SEND_NOW { send_now.as_str() } else { k }, v))
+    // The keys as you have them: the one that sends now is yours if you
+    // moved it (sendmode.go:110-116), the stash's as bound.
+    let box_keys = sendmode::box_keys(&st);
+    let mut pairs: Vec<(&str, &str)> = box_keys
+        .iter()
+        .map(|(k, v)| {
+            let k = match *k {
+                SEND_NOW => send_now.as_str(),
+                sendmode::ASIDE => aside.as_str(),
+                sendmode::HISTORY => history.as_str(),
+                k => k,
+            };
+            (k, v.as_str())
+        })
         .collect();
-    // Where what's kept or cleared goes: the stash's keys while it runs
-    // (sendmode.go:126-139).
-    if st.typed && stash_on {
-        pairs.retain(|(k, _)| *k != sendmode::UNDO_HINT);
-        pairs.push((aside.as_str(), words.verb));
-    } else if !st.cleared && has_stash {
-        pairs.push((aside.as_str(), your_stash.as_str()));
-    }
-    if stash_on {
-        pairs.push((history.as_str(), history_says.as_str()));
-    }
+    // Room left: the conversation's own ways in.
     if side_items {
         pairs.push(("→", "the side"));
+    }
+    // Its runs, each opened in turn without picking it from the list.
+    if has_subs {
+        pairs.push(("alt+↑↓", "its subagents"));
     }
     if turns {
         pairs.push((
@@ -1173,15 +1181,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         ));
     }
     // Alone in a hosted view: the list is ctrl+6 away, and esc only
-    // leaves the box (rushmode.go:3766).
-    let mut back: Vec<(&str, &str)> = if (m.ext.calls.hosted_alone())(m) {
-        vec![
-            ("f1", "more"),
-            ("ctrl+6", "Agents"),
-            ("esc", "leave the box"),
-        ]
+    // leaves the box (rushmode.go:3766). esc says what it does now.
+    let alone = (m.ext.calls.hosted_alone())(m);
+    let esc = sendmode::esc_word(&st, alone);
+    let mut back: Vec<(&str, &str)> = if alone {
+        vec![("f1", "more"), ("ctrl+6", "Agents"), ("esc", esc)]
     } else {
-        vec![("f1", "more"), ("esc", "back")]
+        vec![("f1", "more"), ("esc", esc)]
     };
     if other_view {
         back.insert(0, (preset_key.as_str(), next_view));
@@ -1275,14 +1281,15 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
 }
 
 /// What an empty Session box says of the history, while the stash runs
-/// (sendmode.go:154 historyHint): " · ctrl+r: stashed, sent, cleared".
+/// (sendmode.go:154 historyHint): " · ctrl+r history", the word the hint
+/// row and the flashes use (Go: " · ctrl+r: stashed, sent, cleared").
 fn history_hint(m: &Model) -> String {
-    let (w, on) = rush_ui_plugin_ui::hooks::stash(m);
+    let (_, on) = rush_ui_plugin_ui::hooks::stash(m);
     if !on {
         return String::new();
     }
     let (_, history) = rush_ui_plugin_ui::hooks::stash_keys(m);
-    format!(" · {history}: {}, sent, cleared", w.tab.to_lowercase())
+    format!(" · {history} {}", sendmode::HISTORY_WORD)
 }
 
 /// Whether a decisions card waits on session key, whether you chose to

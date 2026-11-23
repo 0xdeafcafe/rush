@@ -3186,9 +3186,66 @@ The task row's head takes the cursor (`keys::tasks_nav`, `TASKS_REF`):
 shuts it, → opens it and then the Tasks view, ↓ and esc are back in the
 box, ↑ goes on up to the queue, the dock and the conversation. The
 hints under the box say ctrl+t changes "what enter does while it
-works" (Go named the four ways), and a message sent or a box cleared
-flashes "sent · ctrl+r lists what you've sent" (Go: "ctrl+r › Sent has
-it").
+works" (Go named the four ways), and a message sent flashes "sent ·
+ctrl+r lists what you've sent" (Go: "ctrl+r › Sent has it"); "The two
+message boxes", below, has the rest.
+
+### The two message boxes: one model, one set of words (Rust-only)
+
+The Agents box under the list (`list_extras::prompt`) and a Session's
+box (`session_core::keys`, `dock`, `sendmode`) take the same keys for
+the same things and say them in the same words. Each thing has one word:
+
+| word | what happens to your text | key | how it comes back |
+|---|---|---|---|
+| send / sent | goes to the agent now | enter (ctrl+enter while it works) | ctrl+r, the history |
+| queued | waits for the turn under way to end | enter while it works | ↑ picks it |
+| guide | goes into the turn, read at its next step | enter, once ctrl+t chose it | ctrl+r |
+| clear / cleared | wiped from the box (esc, ctrl+c) | esc | cmd+z or ctrl+/ (undo) |
+| set aside | out of the box, back in it after you send | ctrl+p | ctrl+p (the empty Agents box: #stash) |
+| history | what you sent, set aside, cleared and replaced | ctrl+r (#stash) | enter puts one in the box |
+| more | every key, as you have them | f1 | |
+
+"Stash" stays the history's name (its sheet's title, #stash, Settings ›
+Plugins) and the setting that can call it Drafts; nothing a key does is
+called stashing any more (the drafts plugin's Stash words are "Set
+aside", "set aside"; Go's were "Stashed", "stash", "your stash"). A
+decision held off the box says "set aside and answer" (was "stash and
+answer").
+
+**Flashes.** Every way text leaves a box flashes where it went and the
+one key that gets it back (`hooks::keep_sent` with `Went`, `hooks::
+cleared`, the drafts book's `stash`): "sent · ctrl+r lists what you've
+sent", "queued for when it's done · ↑ picks it to change" (Go said
+"sent" of a queued message), "sent into the turn · it reads it at its
+next step · ctrl+r …", "cleared · cmd+z or ctrl+/ brings it back" (Go
+also named the history, a second way back), "set aside · back in the
+box after you send · ctrl+p brings it back now". With something set
+aside, sending adds "what you set aside is back in the box".
+
+**The hint row** under either box, in a fixed order: what enter does now
+(only with something typed), then at most two keys that matter most in
+this state (`sendmode::box_keys`: typed and working, ctrl+enter and
+ctrl+t; typed and idle, ctrl+p and ctrl+r; empty, the way back to what
+was cleared, then to what was set aside, the queue's ctrl+enter, ctrl+x
+where esc can't stop it, ctrl+r), then f1 and esc saying what it does
+now (`sendmode::esc_word`: "clear" with text, "stop the turn" on a live
+turn, else "back"; Go said "back" whatever esc did). The Agents box
+says the same: ctrl+p set aside while typing, undo's keys for two
+minutes after a clear, #stash with something set aside, and f1, not
+Go's ?, which is a letter once something is typed. f1's rows say it in
+the same words (the keymap's titles: "history: …", "… brings back what
+you cleared", "what enter does while it works: …"), and #stash's
+description names ctrl+p, not Go's ctrl+s, which does nothing of the
+kind.
+
+esc with a selection in the Agents box lets go of it first, as a
+Session's box does (Go cleared at once).
+
+Left as they differ, for the list's sake: with nothing typed in the
+Agents box, ctrl+p and ctrl+r are the list's (split, rename), so #stash
+is the way to the history there; ctrl+y redoes in a Session's box but
+opens the pull request from the list (shift+cmd+z redoes in both).
 
 ### A turn waiting to be tried again (Rust-only)
 

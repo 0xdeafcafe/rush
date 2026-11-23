@@ -97,11 +97,11 @@ fn prompt_box_and_keys() {
             120,
             // Room for the Session beside the list: the way back to both
             // follows open (view.go:2853 splitHint).
-            "  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more",
+            "  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  f1 more",
         ),
         (
             70,
-            "  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more",
+            "  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  f1 more",
         ),
     ] {
         let mut m = fleet();
@@ -136,7 +136,7 @@ fn prompt_keys_follow_the_text() {
         last.starts_with("  enter start  ·  shift+tab model"),
         "{last:?}"
     );
-    assert!(last.contains("esc clear  ·  ? more"), "{last:?}");
+    assert!(last.contains("esc clear  ·  f1 more"), "{last:?}");
     assert!(f.iter().any(|l| l.contains("│ ❯ fix it")), "{f:?}");
 
     // ctrl+c clears it, saying how to bring it back (stash.go:187
@@ -153,7 +153,7 @@ fn prompt_keys_follow_the_text() {
     let f = screen(&mut m);
     assert_eq!(
         f.last().unwrap().trim_end(),
-        "  enter run it  ·  esc clear  ·  ? guide"
+        "  enter run it  ·  esc clear  ·  f1 more"
     );
     assert!(
         f.iter()

@@ -191,10 +191,7 @@ fn sent_and_cleared_say_where_they_went() {
     assert_eq!(flash(&m), "sent · ctrl+r lists what you've sent");
     typed(&mut m, "three");
     press(&mut m, "esc");
-    assert_eq!(
-        flash(&m),
-        "cleared · cmd+z or ctrl+/ brings it back · ctrl+r lists what you've cleared"
-    );
+    assert_eq!(flash(&m), "cleared · cmd+z or ctrl+/ brings it back");
     with(
         &mut m,
         UiState {
@@ -207,7 +204,7 @@ fn sent_and_cleared_say_where_they_went() {
     press(&mut m, "enter");
     assert_eq!(
         flash(&m),
-        "sent · your draft is back in the box · ctrl+r lists what you've sent"
+        "sent · what you kept as a draft is back in the box · ctrl+r lists what you've sent"
     );
     assert_eq!(fake.ops(), [send("one"), send("two"), send("four")]);
 }
@@ -344,10 +341,7 @@ fn prompt_wipe() {
     m.input.set("a task");
     m.wipe_prompt();
     assert!(m.input.is_empty());
-    assert_eq!(
-        flash(&m),
-        "cleared · cmd+z or ctrl+/ brings it back · #stash lists what you've cleared"
-    );
+    assert_eq!(flash(&m), "cleared · cmd+z or ctrl+/ brings it back");
 }
 
 /// A plugin's note for the Prompt sits on its bottom edge (view.go:2722).
@@ -417,7 +411,7 @@ fn the_stash_from_the_session() {
     assert!(conn(&mut m, KEY).input.is_empty(), "set aside");
     let f = screen(&mut m).join("\n");
     assert!(
-        f.contains("a message for this agent · ctrl+r: drafts, sent, cleared"),
+        f.contains("a message for this agent · ctrl+r history"),
         "{f}"
     );
     press(&mut m, "ctrl+/");
@@ -426,4 +420,217 @@ fn the_stash_from_the_session() {
         "hello draft",
         "kept to undo"
     );
+}
+
+/// A turn under way in the hosted session: you said text and it works.
+fn at_work(m: &mut Model) {
+    let now = m.now;
+    super::tests::sess(m).sent("go".into(), Vec::new(), now);
+}
+
+/// Every way text leaves a Session's box says where it went and the one
+/// key that gets it back, in the box's words (keepSent, wipeBox).
+#[test]
+fn each_way_out_of_the_box_says_where() {
+    // (what, working, ctrl+t presses first, key, the flash)
+    let cases: &[(&str, bool, usize, &str, &str)] = &[
+        (
+            "sent",
+            false,
+            0,
+            "enter",
+            "sent · ctrl+r lists what you've sent",
+        ),
+        (
+            "queued while it works",
+            true,
+            0,
+            "enter",
+            "queued for when it's done · ↑ picks it to change",
+        ),
+        (
+            "guided while it works",
+            true,
+            1,
+            "enter",
+            "sent into the turn · it reads it at its next step · ctrl+r lists what you've sent",
+        ),
+        (
+            "stopped and sent",
+            true,
+            2,
+            "enter",
+            "sent · ctrl+r lists what you've sent",
+        ),
+        (
+            "sent now while it works",
+            true,
+            0,
+            "ctrl+enter",
+            "sent · ctrl+r lists what you've sent",
+        ),
+        (
+            "cleared with esc",
+            false,
+            0,
+            "esc",
+            "cleared · cmd+z or ctrl+/ brings it back",
+        ),
+        (
+            "cleared with ctrl+c",
+            true,
+            0,
+            "ctrl+c",
+            "cleared · cmd+z or ctrl+/ brings it back",
+        ),
+    ];
+    for (what, work, modes, key, want) in cases {
+        let (mut m, _) = hosted("steer", Vec::new());
+        with(
+            &mut m,
+            UiState {
+                plugins: vec![drafts("")],
+                ..Default::default()
+            },
+        );
+        if *work {
+            at_work(&mut m);
+        }
+        for _ in 0..*modes {
+            press(&mut m, "ctrl+t");
+        }
+        typed(&mut m, "a message");
+        press(&mut m, key);
+        assert_eq!(
+            conn(&mut m, KEY).input.string(),
+            "",
+            "{what}: the box empties"
+        );
+        assert_eq!(flash(&m), *want, "{what}");
+    }
+}
+
+/// The row under a Session's box, state by state: what enter does, the
+/// key or two that matter now, f1, and what esc does now.
+#[test]
+fn the_session_box_hint_row() {
+    // (what, stash on, working, typed, the row has, the row hasn't)
+    let cases: &[(&str, bool, bool, &str, &[&str], &[&str])] = &[
+        (
+            "typed, idle, stash on",
+            true,
+            false,
+            "draft",
+            &[
+                "enter send  ·  ctrl+p set aside  ·  ctrl+r history",
+                "f1 more",
+                "esc clear",
+            ],
+            &["esc back"],
+        ),
+        (
+            "typed, idle, no stash",
+            false,
+            false,
+            "draft",
+            &["enter send", "f1 more", "esc clear"],
+            &["ctrl+p", "ctrl+r"],
+        ),
+        (
+            "empty, idle, stash on",
+            true,
+            false,
+            "",
+            &["ctrl+r history", "f1 more", "esc back"],
+            &["enter"],
+        ),
+        (
+            "typed, working",
+            true,
+            true,
+            "draft",
+            &[
+                "enter queue it  ·  ctrl+enter send now  ·  ctrl+t what enter does while it works",
+                "esc clear",
+            ],
+            &[],
+        ),
+        (
+            "empty, working",
+            true,
+            true,
+            "",
+            &["esc stop the turn"],
+            &["ctrl+x", "esc back"],
+        ),
+    ];
+    for (what, on, work, text, has, hasnt) in cases {
+        let (mut m, _) = hosted("steer", Vec::new());
+        if *on {
+            with(
+                &mut m,
+                UiState {
+                    plugins: vec![drafts("")],
+                    ..Default::default()
+                },
+            );
+        }
+        if *work {
+            at_work(&mut m);
+        }
+        typed(&mut m, text);
+        let f = screen(&mut m);
+        let row = f.last().unwrap();
+        for h in *has {
+            assert!(row.contains(h), "{what}: {h:?} in {row:?}");
+        }
+        for h in *hasnt {
+            assert!(!row.contains(h), "{what}: no {h:?} in {row:?}");
+        }
+    }
+}
+
+/// The Agents box takes the same words: f1 for the keys (? is a letter
+/// once something's typed), ctrl+p sets aside, undo brings back what
+/// was cleared, and esc lets go of a selection before it clears.
+#[test]
+fn the_agents_box_hint_row() {
+    let mut m = crate::new_model("test");
+    m.w = 120;
+    m.h = 30;
+    m.now = 1_000_000;
+    with(
+        &mut m,
+        UiState {
+            plugins: vec![drafts("")],
+            ..Default::default()
+        },
+    );
+    typed(&mut m, "fix it");
+    let last = |m: &mut Model| screen(m).last().unwrap().trim_end().to_string();
+    let row = last(&mut m);
+    assert!(
+        row.starts_with("  enter start  ·  shift+tab model  ·  ctrl+p set aside"),
+        "{row:?}"
+    );
+    assert!(row.ends_with("esc clear  ·  f1 more"), "{row:?}");
+    // A selection: esc lets go of it, then clears.
+    press(&mut m, "shift+left");
+    assert!(m.input.selection().is_some());
+    press(&mut m, "esc");
+    assert_eq!(m.input.string(), "fix it", "the first esc keeps the text");
+    assert!(m.input.selection().is_none());
+    press(&mut m, "esc");
+    assert!(m.input.is_empty());
+    assert_eq!(flash(&m), "cleared · cmd+z or ctrl+/ brings it back");
+    m.flash = None;
+    let row = last(&mut m);
+    assert!(
+        row.starts_with("  cmd+z or ctrl+/ bring back what you cleared"),
+        "{row:?}"
+    );
+    assert!(row.ends_with("f1 more"), "{row:?}");
+    // Two minutes on, the list's own keys again.
+    m.kept::<hooks::PromptCleared>().0 -= 120_000;
+    assert!(!last(&mut m).contains("bring back"));
 }

@@ -37,4 +37,4 @@
 ╭─ new ╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯model  ─╮
 │ ❯ describe a task                                                                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more
+  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  f1 more

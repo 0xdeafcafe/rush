@@ -829,8 +829,17 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     if let Some(v) = m.session.as_mut() {
         v.pos = Pos::End;
     }
-    // The stash told, for its history's Sent (rushmode.go:4743 keepSent).
-    hooks::keep_sent(m, key, &text);
+    // The stash told, for its history's Sent (rushmode.go:4743 keepSent);
+    // the flash says where it went: queued while it works, unless enter
+    // guides or stops it (Rust-only: Go said "sent" of all three).
+    let went = if guide {
+        hooks::Went::Guided
+    } else if working && !now && conn(m, key).hosted() {
+        hooks::Went::Queued
+    } else {
+        hooks::Went::Sent
+    };
+    hooks::keep_sent(m, key, &text, went);
     // Commands you ran waiting to go with it (+ with my next message), in
     // front of your words (Rust-only).
     let text = super::shellbox::with_attached(m, key, text);
