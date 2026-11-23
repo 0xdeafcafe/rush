@@ -607,6 +607,232 @@ fn idle_send_joins_the_queue() {
     );
 }
 
+/// Hooks whose retitler answers `answer` and sends what it was asked down
+/// the channel.
+fn retitling(answer: &'static str) -> (Hooks, std::sync::mpsc::Receiver<String>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx = Mutex::new(tx);
+    let hooks = Hooks {
+        retitler: Some(Arc::new(move |_: &Registry, _: &str, text: &str| {
+            let _ = tx.lock().unwrap().send(text.to_string());
+            answer.to_string()
+        })),
+        ..Hooks::quiet()
+    };
+    (hooks, rx)
+}
+
+/// The `retitled` events in session id's log, each as (from, to).
+fn retitled(id: &str) -> Vec<(String, String)> {
+    crate::events::flush();
+    std::fs::read_to_string(crate::paths::events_path(id))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["kind"] == "retitled")
+        .map(|v| {
+            (
+                v["from"].as_str().unwrap_or("").to_string(),
+                v["to"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+// Rust-only: every fourth message of yours a model is asked whether the
+// session's title still says what it's about, and its new one is taken
+// when the name is still the model's last. rush's own notes aren't
+// messages of yours; a name you set stays; the same title back changes
+// nothing.
+#[test]
+fn retitled_when_its_direction_changes() {
+    use crate::revive::{CUT_NOTE, REVIVE_NOTE};
+    const OLD: &str = "Fix Queue Delivery";
+    const NEW: &str = "Queue Delivery and Metrics";
+    struct Case {
+        id: &'static str,
+        /// The name you gave it, when you did.
+        yours: &'static str,
+        said: &'static [&'static str],
+        answer: &'static str,
+        asked: bool,
+        name: &'static str,
+    }
+    let four: &[&str] = &["add metrics", "count retries", "a dashboard", "alerts too"];
+    let cases = [
+        Case {
+            id: "rt-four",
+            yours: "",
+            said: four,
+            answer: NEW,
+            asked: true,
+            name: NEW,
+        },
+        Case {
+            id: "rt-three",
+            yours: "",
+            said: &["add metrics", "count retries", "a dashboard"],
+            answer: NEW,
+            asked: false,
+            name: OLD,
+        },
+        Case {
+            id: "rt-notes",
+            yours: "",
+            said: &[
+                "add metrics",
+                REVIVE_NOTE,
+                "count retries",
+                CUT_NOTE,
+                "a dashboard",
+            ],
+            answer: NEW,
+            asked: false,
+            name: OLD,
+        },
+        Case {
+            id: "rt-yours",
+            yours: "my queue work",
+            said: four,
+            answer: NEW,
+            asked: false,
+            name: "my queue work",
+        },
+        Case {
+            id: "rt-same",
+            yours: "",
+            said: four,
+            answer: "fix queue delivery.",
+            asked: true,
+            name: OLD,
+        },
+    ];
+    let _home = Home::new();
+    for c in cases {
+        let cfg = Config {
+            id: c.id.into(),
+            name: OLD.into(),
+            auto_title: OLD.into(),
+            prompt: "the queue drops messages".into(),
+            ..Config::default()
+        };
+        std::fs::create_dir_all(dir(&cfg.id)).unwrap();
+        let (hooks, asked) = retitling(c.answer);
+        let (h, _rx) = build(registry(), hooks, cfg);
+        with_conn(&h, Arc::new(Kept::default()));
+        {
+            let mut st = h.lock();
+            st.info.state = "working".into();
+            if !c.yours.is_empty() {
+                st.cfg.name = c.yours.into();
+                st.info.name = c.yours.into();
+            }
+        }
+        for m in c.said {
+            h.send(m, &[], false).unwrap();
+        }
+        if !c.asked {
+            // Nothing was started to ask: there's nothing to wait for.
+            assert!(asked.try_recv().is_err(), "{}: asked", c.id);
+        } else {
+            let text = asked
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| panic!("{}: never asked", c.id));
+            assert_eq!(
+                text,
+                crate::title::again_prompt(
+                    OLD,
+                    "the queue drops messages",
+                    &c.said.iter().map(|m| m.to_string()).collect::<Vec<_>>()
+                ),
+                "{}",
+                c.id
+            );
+            // The answer is taken on the host's thread; taking it here too
+            // says how it stands without waiting for that: whichever is
+            // first renames it, the other finds it done.
+            h.take_title(OLD, c.answer, true);
+        }
+        let st = h.lock();
+        assert_eq!(st.cfg.name, c.name, "{}", c.id);
+        assert_eq!(st.info.name, c.name, "{}", c.id);
+        let renamed = c.name == NEW;
+        assert_eq!(
+            st.cfg.auto_title,
+            if renamed { NEW } else { OLD },
+            "{}",
+            c.id
+        );
+        drop(st);
+        let want: Vec<(String, String)> = if renamed {
+            vec![(OLD.into(), NEW.into())]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(retitled(c.id), want, "{}", c.id);
+        // What's kept of it survives the host sleeping.
+        let saved: Config =
+            serde_json::from_str(&std::fs::read_to_string(dir(c.id).join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            saved.auto_title,
+            if renamed { NEW } else { OLD },
+            "{}",
+            c.id
+        );
+    }
+}
+
+// The notes after rush's own don't hide the messages of yours round them:
+// the fourth of yours asks, with those four and no note.
+#[test]
+fn retitling_counts_only_your_messages() {
+    use crate::revive::REVIVE_NOTE;
+    let _home = Home::new();
+    let cfg = Config {
+        id: "rt-count".into(),
+        name: "Fix Queue Delivery".into(),
+        auto_title: "Fix Queue Delivery".into(),
+        prompt: "the queue drops messages".into(),
+        ..Config::default()
+    };
+    std::fs::create_dir_all(dir(&cfg.id)).unwrap();
+    let (hooks, asked) = retitling("Queue Delivery and Metrics");
+    let (h, _rx) = build(registry(), hooks, cfg);
+    with_conn(&h, Arc::new(Kept::default()));
+    h.lock().info.state = "working".into();
+    for m in ["one", REVIVE_NOTE, "two", "three", REVIVE_NOTE] {
+        h.send(m, &[], false).unwrap();
+    }
+    assert!(asked.try_recv().is_err(), "three of yours so far");
+    assert_eq!(h.lock().cfg.title_since, 3);
+    h.send("four", &[], false).unwrap();
+    let text = asked.recv_timeout(Duration::from_secs(10)).unwrap();
+    for m in ["one", "two", "three", "four"] {
+        assert!(
+            text.contains(&format!("<message>\n{m}\n</message>")),
+            "{text}"
+        );
+    }
+    assert!(!text.contains(REVIVE_NOTE), "{text}");
+    assert_eq!(h.lock().cfg.title_since, 0, "counted from here again");
+}
+
+// A config saved before sessions were named again still loads, and what's
+// kept for it is written only once there is some.
+#[test]
+fn a_config_without_title_fields_loads() {
+    let old: Config = serde_json::from_str(r#"{"id":"x","name":"Fix Queue Delivery"}"#).unwrap();
+    assert!(old.auto_title.is_empty() && old.title_recent.is_empty() && old.title_since == 0);
+    assert!(!String::from_utf8_lossy(&old.to_json_indent()).contains("autoTitle"));
+    let mut c = old.clone();
+    c.auto_title = "Fix Queue Delivery".into();
+    c.title_recent = vec!["add metrics".into()];
+    c.title_since = 1;
+    let back: Config = serde_json::from_slice(&c.to_json_indent()).unwrap();
+    assert_eq!(back, c);
+}
+
 // host_test.go:748
 #[test]
 fn named_from_first_message() {

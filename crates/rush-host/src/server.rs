@@ -202,6 +202,13 @@ type NetSaid = Arc<dyn Fn(&str, SystemTime) + Send + Sync>;
 type HealthFailed = Arc<dyn Fn(&str, &str) + Send + Sync>;
 type Titler = Arc<dyn Fn(&Registry, &str, &str) -> String + Send + Sync>;
 
+/// After how many messages of yours a session's title is looked at again,
+/// how many of the latest a model is given for that, and how much of each
+/// is kept, in characters. Rust-only.
+const RETITLE_EVERY: u32 = 4;
+const TITLE_RECENT: usize = 4;
+const TITLE_KEPT_CHARS: usize = 600;
+
 /// What the host asks of the world beyond the session, replaced in tests
 /// (Go's package variables mayGo, netproofFail, netproofAnswer, titler).
 #[derive(Clone)]
@@ -213,6 +220,10 @@ pub struct Hooks {
     pub health_answered: Arc<dyn Fn(&str) + Send + Sync>,
     /// A short title for a first message; empty when it can't.
     pub titler: Option<Titler>,
+    /// A title for a session that has gone on, from title::again_prompt's
+    /// words: the one it has when it's still about that; empty when it
+    /// can't. Rust-only.
+    pub retitler: Option<Titler>,
     /// A summary of an agent's long message to another for the feed;
     /// empty when it can't (feedSummer).
     pub feed_summer: Option<Titler>,
@@ -282,6 +293,7 @@ impl Hooks {
             }),
             health_answered: Arc::new(|k| rush_state::health::answered(k, Time::now())),
             titler: Some(Arc::new(crate::title::title)),
+            retitler: Some(Arc::new(crate::title::retitle)),
             feed_summer: Some(Arc::new(crate::feed::summary)),
             retry_base: Duration::from_secs(15),
             online_every: ONLINE_EVERY,
@@ -305,6 +317,7 @@ impl Hooks {
             health_failed: Arc::new(|_, _| {}),
             health_answered: Arc::new(|_| {}),
             titler: None,
+            retitler: None,
             feed_summer: None,
             ..Hooks::wired()
         }
@@ -2280,8 +2293,12 @@ impl Host {
             st.cfg.name_first = false;
             st.cfg.name = n.clone();
             st.info.name = n.clone();
+            st.cfg.title_first = crate::views::cut(text.trim(), TITLE_KEPT_CHARS);
             self.save_config(&st);
             self.retitle(&mut st, &n, text);
+        } else if exchange.is_none() {
+            // A message of yours: every few, its name is looked at again.
+            self.note_said(&mut st, text);
         }
         let waiting = st
             .info
@@ -4605,18 +4622,102 @@ impl Host {
         let h = self.clone();
         self.go("title", move |_| {
             let t = titler(&h.reg, &kind, &text);
-            if t.is_empty() {
-                return;
-            }
-            let mut st = h.lock();
-            if st.cfg.name != auto {
-                return;
-            }
-            st.cfg.name = t.clone();
-            st.info.name = t;
-            h.save_config(&st);
-            h.publish(&mut st);
+            h.take_title(&auto, &t, false);
         });
+    }
+
+    /// Counts a message of yours toward naming the session again, and
+    /// keeps it for that: after every RETITLE_EVERY, a model is asked
+    /// whether its title still says what it's about (retitle_again). Not
+    /// rush's own notes to carry on after a restart, nor the first
+    /// message again, which named it. Rust-only.
+    fn note_said(&self, st: &mut State, text: &str) {
+        let said = text.trim();
+        if said.is_empty() || crate::revive::is_rush_note(text) || text == st.cfg.prompt {
+            return;
+        }
+        let c = &mut st.cfg;
+        c.title_recent
+            .push(crate::views::cut(said, TITLE_KEPT_CHARS));
+        if c.title_recent.len() > TITLE_RECENT {
+            c.title_recent.remove(0);
+        }
+        c.title_since += 1;
+        let due = c.title_since >= RETITLE_EVERY;
+        if due {
+            c.title_since = 0;
+        }
+        self.save_config(st);
+        if due {
+            self.retitle_again(st);
+        }
+    }
+
+    /// The name a model may swap for another, and what it's told of the
+    /// session to decide (title::again_prompt): only a name a model gave
+    /// it (cfg.auto_title), or the one made of its first message's words;
+    /// None for a name you set, which stays.
+    fn retitle_ask(st: &State) -> Option<(String, String)> {
+        let c = &st.cfg;
+        let worded = name_from(&c.prompt);
+        let auto = if !c.auto_title.is_empty() && c.name == c.auto_title {
+            c.auto_title.clone()
+        } else if !worded.is_empty() && c.name == worded {
+            worded
+        } else {
+            return None;
+        };
+        if c.title_recent.is_empty() {
+            return None;
+        }
+        let first = if c.prompt.is_empty() {
+            &c.title_first
+        } else {
+            &c.prompt
+        };
+        let text = crate::title::again_prompt(&auto, first, &c.title_recent);
+        Some((auto, text))
+    }
+
+    /// Asks a model whether the session's title still says what it's
+    /// about, and takes its new one when it doesn't (take_title).
+    fn retitle_again(&self, st: &mut State) {
+        let Some(titler) = self.hooks.retitler.clone() else {
+            return;
+        };
+        let Some((auto, text)) = Self::retitle_ask(st) else {
+            return;
+        };
+        let kind = st.cfg.kind.clone();
+        let h = self.clone();
+        self.go("retitle", move |_| {
+            let t = titler(&h.reg, &kind, &text);
+            h.take_title(&auto, &t, true);
+        });
+    }
+
+    /// Names the session t, a model's title, when its name is still auto,
+    /// the one the model was asked about: never over a name set
+    /// meanwhile. again: it had a model's title already, so the same one
+    /// back changes nothing, and a new one is logged as `retitled`.
+    /// Whether it was renamed.
+    fn take_title(&self, auto: &str, t: &str, again: bool) -> bool {
+        if t.is_empty() || again && crate::title::same_title(t, auto) {
+            return false;
+        }
+        let mut st = self.lock();
+        if st.cfg.name != auto {
+            return false;
+        }
+        st.cfg.name = t.to_string();
+        st.cfg.auto_title = t.to_string();
+        st.info.name = t.to_string();
+        self.save_config(&st);
+        if again {
+            self.event(&st, "retitled", json!({"from": auto, "to": t}));
+        }
+        self.publish(&mut st);
+        true
     }
 
     /// Gives a new session asking for one its own worktree, before its

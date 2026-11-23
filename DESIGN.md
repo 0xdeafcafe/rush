@@ -5691,6 +5691,40 @@ Found, not done:
   trim sleeps on a thread of its own that a timer could replace (left to
   the work on threads).
 
+## A session named again when its direction changes (Rust-only)
+
+Go named a session once: `name_from`'s first words of its first message,
+swapped for a model's 3 to 5 word title (`title::title`) unless it had
+been renamed meanwhile. A long session drifts from that. Now
+(`server.rs`: `note_said`, `retitle_ask`, `retitle_again`, `take_title`;
+`title.rs`: `retitle`, `again_prompt`, `same_title`):
+
+- The session's saved config remembers the last name a model gave it
+  (`autoTitle`), your latest messages (`titleRecent`, the last 4, each cut
+  to 600 characters), how many came since it was last named
+  (`titleSince`) and, for one named from its first message
+  (`nameFirst`), that message (`titleFirst`). All default when absent, so
+  an older config loads, and they survive the host sleeping. A successor
+  (`emeritus::successor_config`) keeps the name and whose it is, not the
+  messages.
+- `send` counts a message of yours: not another agent's (an exchange),
+  not rush's own notes to carry on after a restart
+  (`revive::is_rush_note`), not the first message again. After every 4
+  (`RETITLE_EVERY`), `Hooks::retitler` (a second hook of the titler's
+  shape, None in tests' quiet hooks) is asked with the title it has, the
+  first message and the latest ones under a second system prompt: reply
+  with the SAME title unless the direction has changed or widened, else a
+  new 3 to 5 word title that covers where it began and where it has gone.
+  The models asked are the ones the first title asks.
+- The answer is taken only when the session's name is still the one the
+  model was asked about, and only when it differs (`same_title`: case,
+  spaces and a full stop aside). Only a name a model gave, or the one
+  made of the first message's words, is ever asked about: a name you set
+  is neither, so it stays, with no call made. A new title is logged as a
+  `retitled` event with `from` and `to`.
+- A session's @handle follows its title, as it did after the first
+  naming. A list sorted by name moves a retitled row.
+
 ## Footprint watch (Rust-only)
 
 `.github/workflows/footprint.yml` measures rush after every push to main,

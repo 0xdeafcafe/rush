@@ -289,6 +289,10 @@ pub fn successor_config(a: &Config, info: &Info, prompt: String) -> Config {
     b.prompt_exchange = None;
     b.images.clear();
     b.name_first = false;
+    // It has the name, and whose it is; what was said is the other's.
+    b.title_first.clear();
+    b.title_recent.clear();
+    b.title_since = 0;
     b.own_worktree = false;
     b.emeritus = None;
     b.prompt = prompt;

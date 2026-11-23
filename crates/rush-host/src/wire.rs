@@ -109,6 +109,26 @@ pub struct Config {
     /// started without one (by /clear, say).
     #[serde(rename = "nameFirst", skip_serializing_if = "zero")]
     pub name_first: bool,
+    /// The name a model last gave it (title.rs). While name is still
+    /// this, the session is named again when its direction changes; a
+    /// name you set is never this, so it stays. Rust-only.
+    #[serde(rename = "autoTitle", skip_serializing_if = "String::is_empty")]
+    pub auto_title: String,
+    /// The message that named it, for one started without a prompt
+    /// (name_first): what naming it again is told it began with.
+    #[serde(rename = "titleFirst", skip_serializing_if = "String::is_empty")]
+    pub title_first: String,
+    /// Your latest messages, oldest first, each cut short: what naming it
+    /// again reads. Not rush's own notes, nor other agents' messages.
+    #[serde(
+        rename = "titleRecent",
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
+    pub title_recent: Vec<String>,
+    /// How many messages of yours came since it was last named.
+    #[serde(rename = "titleSince", skip_serializing_if = "zero")]
+    pub title_since: u32,
     /// Files attached to the first message.
     #[serde(
         skip_serializing_if = "Vec::is_empty",
