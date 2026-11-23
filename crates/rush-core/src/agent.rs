@@ -328,6 +328,70 @@ pub struct Agent {
     /// stands in a chain of handovers, when it's in one. Boxed: most rows
     /// aren't.
     pub lineage: Option<Box<Lineage>>,
+    /// What a rush session has done, as its host counted it (Rust-only):
+    /// the list's WORK cell and the weight by its name. Empty for every
+    /// other row.
+    pub work: Work,
+}
+
+/// What a session has done, as its host counts it while it works
+/// (Rust-only, nothing of Go's): its task list's tasks done and in all,
+/// and how many files its edits changed. All 0 when nothing counted it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Work {
+    pub done: u16,
+    pub total: u16,
+    pub files: u16,
+}
+
+impl Work {
+    /// Neither a task list nor a file changed: its cell is blank.
+    pub fn is_empty(&self) -> bool {
+        self.total == 0 && self.files == 0
+    }
+
+    /// How much there is to it: the files changed and the tasks still
+    /// open. What the list sorts by work on.
+    pub fn score(&self) -> u32 {
+        u32::from(self.files) + u32::from(self.total.saturating_sub(self.done))
+    }
+
+    /// How many of the weight's three cells are filled: none for nothing
+    /// counted, one for a task list or up to 5 (score), two up to 20,
+    /// three past that.
+    pub fn weight(&self) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
+        match self.score() {
+            0..=5 => 1,
+            6..=20 => 2,
+            _ => 3,
+        }
+    }
+
+    /// The WORK cell: "13/18 · 42f", the tasks and the files each in
+    /// place so the column lines up ("  2/2 ·  1f", "13/18      ",
+    /// "         7f"); "" when empty.
+    pub fn cell(&self) -> String {
+        let tasks = if self.total > 0 {
+            format!("{}/{}", self.done, self.total)
+        } else {
+            String::new()
+        };
+        let files = if self.files > 0 {
+            format!("{}f", self.files)
+        } else {
+            String::new()
+        };
+        match (tasks.is_empty(), files.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => format!("{tasks:>5}      "),
+            (true, false) => format!("{:>5}   {files:>3}", ""),
+            (false, false) => format!("{tasks:>5} · {files:>3}"),
+        }
+    }
 }
 
 impl Agent {
@@ -517,8 +581,9 @@ mod sizes {
     #[test]
     fn rows_stay_small() {
         let cases = [
-            // 1288: Emeritus's lineage, boxed (8 B).
-            ("Agent", size_of::<Agent>(), 1288),
+            // 1288: Emeritus's lineage, boxed (8 B); 1296: its Work, three
+            // u16s (Rust-only).
+            ("Agent", size_of::<Agent>(), 1296),
             ("Job", size_of::<Job>(), 384),
             ("Spend", size_of::<Spend>(), 304),
             (
@@ -529,6 +594,33 @@ mod sizes {
         ];
         for (name, size, most) in cases {
             assert!(size <= most, "{name} is {size} B, more than {most}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod work {
+    use super::Work;
+
+    #[test]
+    fn a_sessions_work_its_cell_and_its_weight() {
+        // (done, total, files, the cell, the weight)
+        let cases = [
+            (0, 0, 0, "", 0),
+            (2, 2, 1, "  2/2 ·  1f", 1),
+            (13, 18, 42, "13/18 · 42f", 3),
+            (0, 3, 0, "  0/3      ", 1),
+            (3, 3, 0, "  3/3      ", 1),
+            (0, 0, 7, "         7f", 2),
+            (0, 0, 5, "         5f", 1),
+            (1, 10, 12, " 1/10 · 12f", 3),
+            (0, 0, 21, "        21f", 3),
+        ];
+        for (done, total, files, cell, weight) in cases {
+            let w = Work { done, total, files };
+            assert_eq!(w.cell(), cell, "{w:?}");
+            assert_eq!(w.weight(), weight, "{w:?}");
+            assert_eq!(w.is_empty(), weight == 0, "{w:?}");
         }
     }
 }
