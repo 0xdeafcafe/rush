@@ -2065,13 +2065,36 @@ impl<'a> Drawer<'a> {
         }
     }
 
+    /// Whether the newest step shows opened for being the newest: one
+    /// that failed or still runs, an edit (its diff), a picture, or
+    /// anything that isn't a look at the disk or the web. A read, a
+    /// search, a listing or a command that came back fine stays the one
+    /// row the steps above it are, enter opening it. Not Go's, which
+    /// opened the newest whatever it was: 47 lines of a file under each
+    /// read as it went by.
+    fn worth_opening(&self, id: StepId) -> bool {
+        let st = self.s.step(id);
+        st.status != Status::Ok
+            || self.tests_failed(id)
+            || !st.images.is_empty()
+            || !matches!(
+                st.kind,
+                Kind::Read
+                    | Kind::Search
+                    | Kind::Glob
+                    | Kind::Fetch
+                    | Kind::WebSearch
+                    | Kind::Shell
+            )
+    }
+
     fn step_open(&self, id: StepId, r: &str) -> bool {
         if let Some(v) = self.o.open.get(r) {
             return *v;
         }
         self.force_open
             || self.o.verbose
-            || Some(id) == self.latest && self.step_cards(id).is_empty()
+            || Some(id) == self.latest && self.step_cards(id).is_empty() && self.worth_opening(id)
             // A chain or script seen running shows where it is, each
             // command's time and the keys, wherever it is in the turn:
             // calls run side by side, or one sent to the background with
