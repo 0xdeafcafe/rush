@@ -3522,15 +3522,31 @@ is made. Everything below is in `rush_ui::frame`.
   millisecond) and ended or signalled off the UI thread. What's paused
   lives in `projects_machine::shells`'s one map; the conversation marks
   it (`Options::paused`) and rush lets them all go on as it quits.
-  In the conversation (`render::draw::chain`), a running chain's step row
-  says its place (`2/3 cargo test`, runningPart), each command its time
-  beside it (`Session::part_marks`, partMarks: ✓ how long, the spinner
-  and how long for the one running now, ✗ where it failed), and under the
-  commands a row of the keys: k skips the command running now, x stops the
-  whole chain, p pauses (with "↑ pick this step, then" until it's picked;
-  new in the Rust port, Go showed them only in the hint row). Code's check
-  line says the place too, Chat's bubble foot names it; Code shows the
-  keys.
+  In the conversation (`render::draw::chain`), a chain that runs is a
+  list of its steps under the step's row (`chain_list`; Rust-only, Go drew
+  the command's whole text): a row for each command with how it stands
+  (`Session::part_marks`, partMarks: ✓ and how long it took, the spinner,
+  how long it has run and the process busy under it, ⏸ paused, ✗ where it
+  failed, ○ not started), the last two lines printed under the one
+  running, then one row of keys, `▸ enter opens it · x stops the chain`
+  (with "↑ pick this step, then" until it's picked). A heredoc's lines
+  fold into the command's name (`python3 (59-line script)`), a pipeline is
+  named by the command it starts with, and a name is cut to the width. k
+  and p are in the hints at the foot of the screen. The step's row leaves
+  out the place while the list shows. Enter opens the call as written, as
+  a finished one is drawn and as Go drew a running one: the row says its
+  place (`2/3 cargo test`, runningPart), each command has its time beside
+  it, and under the commands a row of all the keys: k skips the command
+  running now, x stops the whole chain, p pauses (new in the Rust port,
+  Go showed them only in the hint row). A loop, an if and a script file
+  keep that drawing while they run. Code's check line says the place too,
+  Chat's bubble foot names it; Code shows the keys.
+  A process that fits two commands of the chain equally (step 3's
+  `| grep -n "a b"` beside step 2's `grep -n`) went to the earlier one
+  (partOf's rule), so the chain said step 2 ran, from when step 3's
+  pipeline started, while step 3's tests did. Rust-only: such a process is
+  the later command's when another process seen in the same look can only
+  be that command's (`Chain::watch`, `part_ties`).
   A pipeline is one command of the chain (one place, one time; k and p
   act on all its stages together) but drawn split by pipe
   (`shell::pipeline_stages`): the stage doing the work on the command's

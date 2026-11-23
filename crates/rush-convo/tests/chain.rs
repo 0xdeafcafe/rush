@@ -71,46 +71,130 @@ fn snapshot(name: &str, got: &str) {
     assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
 }
 
-/// Normal: the step's row says 2/3 cargo test, each command its time
-/// (the build's 4s, the tests' spinner and 15s, clippy nothing yet), and
-/// under them the keys; picked, the keys alone.
+/// Normal: under the step's row a row for each command of the chain (the
+/// build ✓ and its 4s, the tests' spinner and 15s, clippy ○ not started),
+/// then one row of keys; picked, the keys alone.
 #[test]
-fn normal_shows_the_place_the_times_and_the_keys() {
+fn normal_lists_the_steps_their_times_and_the_keys() {
     let s = running();
     let got = draw(&s, Preset::Normal, "");
     snapshot("chain_running_normal", &got);
     let row = got
         .lines()
-        .find(|l| l.starts_with("t1:s:b1") && l.contains("2/3 cargo test"))
-        .unwrap_or_else(|| panic!("the step's row names the command running now:\n{got}"));
+        .find(|l| l.starts_with("t1:s:b1") && l.contains("cargo build, cargo test"))
+        .unwrap_or_else(|| panic!("the step's row:\n{got}"));
     assert!(row.contains("19s"), "how long the call has run: {row}");
+    assert!(!row.contains("2/3"), "the list says which runs: {row}");
+    let build = got
+        .lines()
+        .find(|l| l.contains("✓ cargo build"))
+        .expect(&got);
+    assert!(build.contains("4.0s"), "the build took 4s: {build}");
+    let test = got
+        .lines()
+        .find(|l| l.contains("cargo test --workspace"))
+        .expect(&got);
+    assert!(test.contains("15s"), "the tests run 15s now: {test}");
+    assert!(got.contains("○ cargo clippy"), "clippy hasn't run: {got}");
+    assert!(
+        !got.contains("$ cargo"),
+        "not the command as written: {got}"
+    );
+    assert!(
+        got.contains("▸ ↑ pick this step, then  enter opens it · x stops the chain"),
+        "{got}"
+    );
+    let picked = draw(&s, Preset::Normal, "t1:s:b1");
+    assert!(
+        picked.contains("▸ enter opens it · x stops the chain")
+            && !picked.contains("pick this step"),
+        "{picked}"
+    );
+}
+
+/// Opened (enter), a running chain is its command as written: each
+/// command's time beside it and all the keys.
+#[test]
+fn opened_it_is_the_command_as_written() {
+    let s = running();
+    let mut o = Options {
+        width: 100,
+        now: at(20),
+        preset: Preset::Normal,
+        ..Options::default()
+    };
+    o.open.insert("t1:s:b1".into(), true);
+    let got = plain(&Renderer::new().render(&s, &o));
     let build = got
         .lines()
         .find(|l| l.contains("$ cargo build"))
         .expect(&got);
     assert!(build.contains("✓ 4"), "the build took 4s: {build}");
-    let test = got
-        .lines()
-        .find(|l| l.contains("▸ cargo test"))
-        .expect(&got);
-    assert!(test.contains("15"), "the tests run 15s now: {test}");
-    let clippy = got
-        .lines()
-        .find(|l| l.contains("$ cargo clippy"))
-        .expect(&got);
-    assert!(!clippy.contains('✓'), "clippy hasn't run: {clippy}");
+    assert!(got.contains("▸ cargo test --workspace"), "{got}");
+    assert!(got.contains("2/3 cargo test"), "{got}");
     assert!(
         got.contains(
             "↑ pick this step, then  k skip cargo test · x stop the whole chain · p pause it"
         ),
         "{got}"
     );
-    let picked = draw(&s, Preset::Normal, "t1:s:b1");
-    assert!(
-        picked.contains("k skip cargo test · x stop the whole chain · p pause it")
-            && !picked.contains("pick this step"),
-        "{picked}"
+    assert!(!got.contains("enter opens it"), "{got}");
+}
+
+/// A heredoc's lines and a pipeline's filters fold into the command's
+/// name, and the last two lines printed show under the command running.
+#[test]
+fn the_list_folds_a_heredoc_and_a_pipeline_and_shows_the_last_output() {
+    let cmd = "python3 - <<'EOF'\nimport os\nprint(os.getcwd())\nEOF\ncargo fmt --all && cargo clippy --workspace 2>&1 | tail -8; cargo test -p term-core";
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("finish it"), at(0));
+    s.feed(tool_use("b1", "Bash", json!({"command": cmd})), at(1));
+    let sh = Shell {
+        command: cmd.into(),
+        start: at(1),
+        kids: vec![ShellProc {
+            pid: 4242,
+            args: ["cargo", "clippy", "--workspace"]
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+            start: at(5),
+            kids: Vec::new(),
+        }],
+        ..Shell::default()
+    };
+    s.watch_shells(&[sh], at(6));
+    s.feed(
+        rush_core::event::Event::CallOutput(rush_core::event::CallOutput {
+            id: "b1".into(),
+            text: "Compiling a\nChecking b\nFinished dev\n".into(),
+            whole: false,
+        }),
+        at(7),
     );
+    let got = draw(&s, Preset::Normal, "");
+    let rows: Vec<&str> = got.lines().collect();
+    let at_row = |what: &str| {
+        rows.iter()
+            .position(|l| l.contains(what))
+            .unwrap_or_else(|| panic!("no row with {what:?}:\n{got}"))
+    };
+    let (py, fmt, clippy, test) = (
+        at_row("✓ python3 (2-line script)"),
+        at_row("✓ cargo fmt --all"),
+        at_row("cargo clippy --workspace"),
+        at_row("○ cargo test -p term-core"),
+    );
+    assert!(py < fmt && fmt < clippy && clippy < test, "{got}");
+    assert!(!got.contains("import os"), "the script's lines: {got}");
+    assert!(!got.contains("tail -8"), "the pipeline's filter: {got}");
+    // The last two lines, under the command running, not the third.
+    assert!(rows[clippy + 1].contains("Checking b"), "{got}");
+    assert!(rows[clippy + 2].contains("Finished dev"), "{got}");
+    assert_eq!(clippy + 3, test, "{got}");
+    assert!(!got.contains("Compiling a"), "{got}");
+    assert!(!got.contains("more line"), "no fold of its own: {got}");
 }
 
 /// Code's check line and Chat's bubble foot say which command runs; Code

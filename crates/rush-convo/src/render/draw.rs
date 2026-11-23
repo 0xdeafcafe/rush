@@ -2182,7 +2182,9 @@ impl<'a> Drawer<'a> {
         {
             label = spawn_name(&sp, st, &self.o.kind);
         }
-        let (mut cells, right) = self.cells(id);
+        // The list under an open running chain says which command runs.
+        let listed = open && !self.o.open.contains_key(r) && self.chain_listed(id);
+        let (mut cells, right) = self.cells(id, !listed);
         // A call whose running command rush paused (render.go:2347).
         if st.status == Status::Running && self.o.paused.contains(&*st.id) {
             if !cells.is_empty() {
@@ -2257,8 +2259,9 @@ impl<'a> Drawer<'a> {
     }
 
     /// What a step's row says after its label, and on the right how long it
-    /// took (render.go:2337).
-    fn cells(&mut self, id: StepId) -> (Txt, Txt) {
+    /// took (render.go:2337). place: with which command of its chain runs
+    /// now; not when the list under the row says it.
+    fn cells(&mut self, id: StepId, place: bool) -> (Txt, Txt) {
         let st = self.s.step(id);
         if st.status == Status::Waiting {
             let mut wait = Txt::new();
@@ -2293,7 +2296,7 @@ impl<'a> Drawer<'a> {
         if (st.status == Status::Running || self.run_live(st)) && st.start != 0 {
             // Which command of its chain runs now: 2/3 cargo test.
             let p = self.s.running_label(id);
-            if !p.is_empty() {
+            if !p.is_empty() && place {
                 parts.push(paint(C_SUB, &p));
             }
             let s = self.since(st.start);
@@ -2815,7 +2818,11 @@ impl<'a> Drawer<'a> {
                 // A chain seen running shows its commands even at a peek:
                 // which runs now, how long each took, and the keys.
                 let chain = !self.s.running_label(id).is_empty();
-                if !cmd.is_empty()
+                // Running, it's a list of its steps, until enter opens the
+                // call as written.
+                let listed = chain && self.peek && self.chain_list(id, &r, indent);
+                if !listed
+                    && !cmd.is_empty()
                     && (!self.peek || chain || shell_shape(self.p, cmd).kind == "write")
                 {
                     drawn = self.shell_body(Some(id), cmd, indent);
@@ -2823,7 +2830,9 @@ impl<'a> Drawer<'a> {
                     self.script_rows(id, indent);
                     self.chain_keys(id, indent);
                 }
-                self.live_rows(id, indent);
+                if !listed {
+                    self.live_rows(id, indent);
+                }
                 let o = &info.out;
                 if !o.stdout.is_empty() || !o.stderr.is_empty() {
                     // The command, then what it printed, on one gutter.

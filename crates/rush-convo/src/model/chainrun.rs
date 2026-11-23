@@ -317,31 +317,51 @@ impl Chain {
         let ch = self;
         // A process that is one of the chain's commands stands for all it
         // starts: make's git is make's, not the chain's git status.
-        let mut seen: HashMap<usize, Ms> = HashMap::new();
-        let mut procs: HashMap<usize, Vec<PartProc>> = HashMap::new();
+        let mut found: Vec<(PartProc, usize, Vec<usize>)> = Vec::new();
         fn walk(
             ps: &[ShellProc],
             segs: &[Segment],
             from: usize,
-            seen: &mut HashMap<usize, Ms>,
-            procs: &mut HashMap<usize, Vec<PartProc>>,
+            found: &mut Vec<(PartProc, usize, Vec<usize>)>,
         ) {
             for p in ps {
                 if let Some(k) = part_of(segs, &p.args, from) {
-                    let t = seen.entry(k).or_insert(p.start);
-                    if p.start < *t {
-                        *t = p.start;
-                    }
-                    procs.entry(k).or_default().push(PartProc {
+                    let pp = PartProc {
                         pid: p.pid,
                         start: p.start,
-                    });
+                    };
+                    found.push((pp, k, part_ties(segs, &p.args)));
                     continue;
                 }
-                walk(&p.kids, segs, from, seen, procs);
+                walk(&p.kids, segs, from, found);
             }
         }
-        walk(&sh.kids, &segs, ch.at, &mut seen, &mut procs);
+        walk(&sh.kids, &segs, ch.at, &mut found);
+        // A process that could be a later command's as well as the one it
+        // was given to (step 3's `| grep -n` beside step 2's `grep -n`) is
+        // the later one's when another process seen now can only be that
+        // command's: the stages of one pipeline run together. Not Go's,
+        // which left it with the earlier command, so the chain said step
+        // 2 ran while step 3's tests did.
+        let sure: Vec<usize> = found
+            .iter()
+            .filter(|(_, _, ties)| ties.len() == 1)
+            .map(|(_, k, _)| *k)
+            .collect();
+        let mut seen: HashMap<usize, Ms> = HashMap::new();
+        let mut procs: HashMap<usize, Vec<PartProc>> = HashMap::new();
+        for (pp, k, ties) in &found {
+            let k = ties
+                .iter()
+                .rfind(|j| **j > *k && sure.contains(j))
+                .copied()
+                .unwrap_or(*k);
+            let t = seen.entry(k).or_insert(pp.start);
+            if pp.start < *t {
+                *t = pp.start;
+            }
+            procs.entry(k).or_default().push(*pp);
+        }
         for (&k, &t) in &seen {
             let r = ch.parts.entry(k).or_insert(PartRun {
                 start: t,
@@ -859,29 +879,8 @@ fn place(segs: &[Segment], k: usize) -> (usize, usize) {
 /// and that shares most words with it, the earliest from part from on
 /// when several do equally; None for none (partOf).
 fn part_of(segs: &[Segment], args: &[String], from: usize) -> Option<usize> {
-    let argv = bare(args);
-    if argv.is_empty() {
-        return None;
-    }
-    // A script runs as its interpreter: bash ./build.sh.
-    let mut progs = vec![argv[0].clone()];
-    if argv.len() > 1 && !argv[1].starts_with('-') {
-        progs.push(base(&argv[1]).to_string());
-    }
-    let have: std::collections::HashSet<&str> = argv[1..].iter().map(String::as_str).collect();
     let (mut best, mut score): (Option<usize>, usize) = (None, 0);
-    for (k, sg) in segs.iter().enumerate() {
-        let mut sc = 0;
-        for stage in std::iter::once(&sg.text).chain(sg.filters.iter()) {
-            // do cargo test $x: the loop's words aren't the program's.
-            let Some(t) = run_text(stage) else { continue };
-            let w = bare(&fields_of(&t));
-            if w.is_empty() || !progs.contains(&w[0]) {
-                continue;
-            }
-            let n = 1 + w[1..].iter().filter(|a| have.contains(unquote(a))).count();
-            sc = sc.max(n);
-        }
+    for (k, sc) in part_scores(segs, args).into_iter().enumerate() {
         let before = best.is_none_or(|b| b < from);
         if sc > score || sc == score && sc > 0 && before && k >= from {
             best = Some(k);
@@ -889,6 +888,48 @@ fn part_of(segs: &[Segment], args: &[String], from: usize) -> Option<usize> {
         }
     }
     best
+}
+
+/// The commands of the chain a process could equally be: those sharing
+/// most words with it, in the chain's order; one when it's sure.
+fn part_ties(segs: &[Segment], args: &[String]) -> Vec<usize> {
+    let scores = part_scores(segs, args);
+    let most = scores.iter().copied().max().unwrap_or(0);
+    if most == 0 {
+        return Vec::new();
+    }
+    (0..scores.len()).filter(|&k| scores[k] == most).collect()
+}
+
+/// How well a process fits each command of the chain: 0 when it isn't
+/// its program, else 1 and a point for each word they share.
+fn part_scores(segs: &[Segment], args: &[String]) -> Vec<usize> {
+    let argv = bare(args);
+    if argv.is_empty() {
+        return vec![0; segs.len()];
+    }
+    // A script runs as its interpreter: bash ./build.sh.
+    let mut progs = vec![argv[0].clone()];
+    if argv.len() > 1 && !argv[1].starts_with('-') {
+        progs.push(base(&argv[1]).to_string());
+    }
+    let have: std::collections::HashSet<&str> = argv[1..].iter().map(String::as_str).collect();
+    segs.iter()
+        .map(|sg| {
+            let mut sc = 0;
+            for stage in std::iter::once(&sg.text).chain(sg.filters.iter()) {
+                // do cargo test $x: the loop's words aren't the program's.
+                let Some(t) = run_text(stage) else { continue };
+                let w = bare(&fields_of(&t));
+                if w.is_empty() || !progs.contains(&w[0]) {
+                    continue;
+                }
+                let n = 1 + w[1..].iter().filter(|a| have.contains(unquote(a))).count();
+                sc = sc.max(n);
+            }
+            sc
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1073,6 +1114,54 @@ mod tests {
             }
         );
         assert_eq!(s.part_marks(id, 3, 9_000, true)[1], PartMark::Paused);
+    }
+
+    /// A filter of the pipeline running now that an earlier command could
+    /// be too (`grep -n`, its pattern quoted) is the pipeline's: the row
+    /// names the command really running, and the earlier one isn't run
+    /// again.
+    #[test]
+    fn a_later_pipelines_filter_isnt_the_earlier_command() {
+        let cmd = "cargo fmt --all && grep -n \"fn main\" src/main.rs; cargo xtask test 2>&1 | grep -n \"test result\"";
+        let mut s = session(cmd);
+        let id = s.step_by_call("b1").unwrap();
+        let sh = |kids| Shell {
+            command: cmd.into(),
+            start: 1_000,
+            kids,
+            ..Shell::default()
+        };
+        s.watch_shells(
+            &[sh(vec![proc_(11, "grep -n fn main src/main.rs", 2_000)])],
+            2_100,
+        );
+        assert_eq!(s.running_label(id), "2/3 grep -n");
+        // Step 3's pipeline: its grep fits step 2 as well as its own.
+        let look = vec![
+            proc_(12, "cargo xtask test", 3_000),
+            proc_(13, "grep -n test result", 3_000),
+        ];
+        s.watch_shells(&[sh(look)], 4_000);
+        assert_eq!(s.running_label(id), "3/3 cargo xtask");
+        let marks = s.part_marks(id, 3, 9_000, false);
+        assert_eq!(
+            marks[1],
+            PartMark::Ran {
+                took: 1_000,
+                runs: 1,
+                failed: false
+            },
+            "{marks:?}"
+        );
+        assert_eq!(
+            marks[2],
+            PartMark::Running {
+                since: 3_000,
+                runs: 1
+            }
+        );
+        let rp = s.running_part("b1").expect("running");
+        assert_eq!(rp.procs.len(), 2, "k and p act on both stages: {rp:?}");
     }
 
     #[test]

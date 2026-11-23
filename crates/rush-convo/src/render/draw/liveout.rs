@@ -164,7 +164,7 @@ impl<'a> Drawer<'a> {
 
 /// A line of output without its escapes: its colours are dropped, as the
 /// tail is drawn dim.
-fn plain_text(l: &str) -> String {
+pub(crate) fn plain_text(l: &str) -> String {
     if !l.contains('\x1b') && !l.chars().any(char::is_control) {
         return l.to_string();
     }

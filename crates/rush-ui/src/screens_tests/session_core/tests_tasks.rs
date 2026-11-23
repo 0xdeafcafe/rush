@@ -637,9 +637,9 @@ fn k_kills_and_p_pauses_the_chains_command() {
     assert!(ops(&fake).is_empty());
 }
 
-/// A running chain in the conversation says which command runs (2/3)
-/// and how long each took, and under it the keys: k skips the command
-/// running now, x stops the whole chain through the host.
+/// A running chain in the conversation is a list of its commands, each
+/// with how it stands, and under them one row of keys; k skips the
+/// command running now, x stops the whole chain through the host.
 #[test]
 fn a_running_chain_says_where_it_is_and_k_and_x_act() {
     let d = tempfile::tempdir().unwrap();
@@ -655,22 +655,21 @@ fn a_running_chain_says_where_it_is_and_k_and_x_act() {
             .collect::<String>()
     };
     let got = convo(&mut m);
-    assert!(got.contains("2/3 go test"), "{got}");
     let vet = got
         .lines()
-        .find(|l| l.contains("$ go vet ./..."))
+        .find(|l| l.contains("✓ go vet ./..."))
         .expect(&got);
-    assert!(vet.contains('✓'), "{vet}");
+    assert!(!vet.contains('$'), "{vet}");
+    assert!(got.contains("go test ./internal/ui"), "{got}");
+    assert!(got.contains("○ echo ok"), "{got}");
     assert!(
-        got.contains(
-            "↑ pick this step, then  k skip go test · x stop the whole chain · p pause it"
-        ),
+        got.contains("▸ ↑ pick this step, then  enter opens it · x stops the chain"),
         "{got}"
     );
     pick(&mut m, "t1:s:tck");
     let got = convo(&mut m);
     assert!(
-        got.contains("k skip go test · x stop the whole chain") && !got.contains("pick this step"),
+        got.contains("▸ enter opens it · x stops the chain") && !got.contains("pick this step"),
         "{got}"
     );
     press(&mut m, "k");
