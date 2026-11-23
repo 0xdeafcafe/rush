@@ -10,9 +10,9 @@
     Conversation ▾   Overview   Changes    [ ] views      esc back to the list
 ───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
   ▍ first   fix the test
+
   ▍ Claude  12:00 · @set-up-caching-for-ci
   │   ✓ cargo test                                                         7s
-  │       │ ok
   ▍
   ▍ Fixed it.
   ▍                                                              1 step   13s

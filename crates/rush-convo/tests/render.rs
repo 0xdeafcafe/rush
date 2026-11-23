@@ -631,7 +631,10 @@ fn a_diff_printed_draws_as_an_edit() {
         ),
         at(2),
     );
-    let out = text(&Renderer::new().render(&s, &opts(100, at(3))));
+    // A command that came back fine is one row until it's opened.
+    let mut o = opts(100, at(3));
+    o.open.insert("t1:s:d".into(), true);
+    let out = text(&Renderer::new().render(&s, &o));
     for want in [
         "│ x.go  +1 −1",
         "│     1   package x",
