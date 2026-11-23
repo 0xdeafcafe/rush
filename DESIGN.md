@@ -3168,6 +3168,15 @@ own adapter, `read_history`), again only once their file grows: their
 steps and replies go under the step that ran them, and Changes takes
 their edits.
 
+### The list's columns, some turned off (Rust-only)
+
+`Model::col_widths` hid each column under a width worked out for all six
+on (CPU and running under 96, tokens under 76, RAM under 64, cost under
+44), so with only CPU on it was gone in a list RAM alone would still
+show in. With any column turned off in Settings, those left go only
+when the row has no room for them and 40 cells of name
+(`ROOM_FOR_NAME`), in the same order. All six on, the widths are Go's.
+
 ### One name for a model, and a new session's effort (Rust-only)
 
 A Claude alias (`fable`, `opus[1m]`) is named as the model it runs now:

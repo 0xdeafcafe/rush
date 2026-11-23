@@ -71,6 +71,9 @@ const W_RAM: usize = 7;
 const W_TOK: usize = 7;
 const W_COST: usize = 8;
 const W_AGE: usize = 5;
+/// What a row keeps for its name before a column goes, when some are
+/// turned off (Rust-only).
+const ROOM_FOR_NAME: usize = 40;
 
 const MINUTE: Ms = 60_000;
 const HOUR: Ms = 60 * MINUTE;
@@ -939,6 +942,26 @@ impl Model {
     /// The list's right-hand columns at width w.
     pub fn col_widths(&self, w: usize) -> [usize; 6] {
         let mut c = [W_ACT, W_CPU, W_RAM, W_TOK, W_COST, W_AGE + 2];
+        const COLS: [&str; 6] = ["running", "cpu", "ram", "tokens", "cost", "time"];
+        // With columns turned off, those left go only as the list has no
+        // room for them and a name (ROOM_FOR_NAME), the first to go as
+        // below: running, CPU, tokens, RAM, cost. Not Go's, whose widths
+        // below are where each goes with all six on, so CPU alone was
+        // hidden under 96 wide and RAM alone under 64.
+        if COLS.iter().any(|col| !self.cfg.shows(col)) {
+            for (i, col) in COLS.iter().enumerate() {
+                if !self.cfg.shows(col) {
+                    c[i] = 0;
+                }
+            }
+            for i in [0, 1, 3, 2, 4] {
+                if c.iter().sum::<usize>() + ROOM_FOR_NAME <= w {
+                    break;
+                }
+                c[i] = 0;
+            }
+            return c;
+        }
         if w < 96 {
             c[0] = 0;
             c[1] = 0;
@@ -952,10 +975,7 @@ impl Model {
         if w < 44 {
             c[4] = 0;
         }
-        for (i, col) in ["running", "cpu", "ram", "tokens", "cost", "time"]
-            .iter()
-            .enumerate()
-        {
+        for (i, col) in COLS.iter().enumerate() {
             if !self.cfg.shows(col) {
                 c[i] = 0;
             }

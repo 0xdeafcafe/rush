@@ -43,6 +43,28 @@ fn hidden_columns() {
     assert!(m.name_column(200) >= before);
 }
 
+/// A column left on has the room of those turned off: CPU alone stays in
+/// a list too narrow for all six, as RAM alone does.
+#[test]
+fn a_column_alone_keeps_its_room() {
+    let mut m = model_of(vec![agent("a1", "one", State::Idle, 1)], 200, 50);
+    assert_eq!(m.col_widths(80)[1], 0, "all six on, CPU goes under 96");
+    for only in ["cpu", "ram"] {
+        m.cfg.hide_columns = ["running", "cpu", "ram", "tokens", "cost", "time"]
+            .iter()
+            .filter(|c| **c != only)
+            .map(|c| c.to_string())
+            .collect();
+        let at = if only == "cpu" { 1 } else { 2 };
+        for w in [200, 80, 50] {
+            let c = m.col_widths(w);
+            assert!(c[at] > 0, "{only} at {w}: {c:?}");
+            assert_eq!(c.iter().filter(|n| **n > 0).count(), 1, "{only} at {w}");
+        }
+        assert_eq!(m.col_widths(40), [0; 6], "{only}: no room at all");
+    }
+}
+
 /// Rows stack once the list has StackAt percent of the screen or less,
 /// and only when too narrow once that's off (stacked_test.go).
 #[test]
