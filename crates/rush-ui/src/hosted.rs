@@ -497,12 +497,14 @@ mod tests {
             .find(" Projects ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         let x = x.expect("the Projects tab");
-        assert_eq!(m.header_tab_at(x, 2), None);
+        // With a conversation open the places are on the header's one row.
+        let y = if m.compact() { 0 } else { m.text_at() + 1 };
+        assert_eq!(m.header_tab_at(x, y), None);
         let x = row
             .find(" Settings ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         assert!(
-            m.header_tab_at(x.unwrap(), 2).is_some(),
+            m.header_tab_at(x.unwrap(), y).is_some(),
             "Settings still opens"
         );
     }

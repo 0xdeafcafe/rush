@@ -3990,7 +3990,7 @@ is made. Everything below is in `rush_ui::frame`.
   agent label and how it's connected; "esc back to the list" and the
   depth's chip. With no rule, the tab showing is orange while the
   Session has the keys. The pointer on the tabs' row is put back by
-  `meta_dx` to where the built meta row has its marks.
+  `meta_map` to where the built meta row has its marks.
 - **clanker's reactions** (`clanker.rs`). What `session_core::finish`
   keeps (`Finish.fx`) is drawn on him as Go's clkFX: drawing the header
   moves the reaction on a frame for every 70 ms gone and asks for a wake

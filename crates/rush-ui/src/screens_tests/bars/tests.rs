@@ -292,10 +292,10 @@ fn the_permission_mode_is_a_click_away() {
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     let top = m.session.as_ref().unwrap().top;
     let head = top - crate::session::HEAD_H - m.session.as_ref().unwrap().top_off;
-    let name = &rows[head + 1];
+    let name = &rows[head];
     assert!(name.contains("tidy the parser"), "{name:?}");
     assert!(name.trim_end().ends_with("plan"), "{name:?}");
-    let meta = &rows[head + 2];
+    let meta = &rows[head + 1];
     assert!(meta.contains("checkout · main"), "{meta:?}");
     assert!(meta.trim_end().ends_with("send to resume"), "{meta:?}");
     let (row, at, w) = m.kept::<State>().mode_at;
@@ -307,13 +307,13 @@ fn the_permission_mode_is_a_click_away() {
         x
     );
     // The pointer over it lights it.
-    assert_eq!(click(&mut m, MouseKind::Moved, x + 1, head + 1), Out::Draw);
+    assert_eq!(click(&mut m, MouseKind::Moved, x + 1, head), Out::Draw);
     assert_eq!(m.kept::<State>().hover_mode, KEY);
-    assert_eq!(click(&mut m, MouseKind::Moved, x + 9, head + 1), Out::Draw);
+    assert_eq!(click(&mut m, MouseKind::Moved, x + 9, head), Out::Draw);
     assert_eq!(m.kept::<State>().hover_mode, "");
     // A click on it: the permission command, the setup sheet on its
     // Permissions row (permissions.go:105-111), or why it can't open.
-    click(&mut m, MouseKind::Down(Button::Left), x, head + 1);
+    click(&mut m, MouseKind::Down(Button::Left), x, head);
     let said = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     match m.sheet_as::<rush_ui_accounts::startsheet::StartSheet>() {
         Some(s) => assert!(s.row == 6 && s.apply_only),
@@ -322,7 +322,7 @@ fn the_permission_mode_is_a_click_away() {
     // Not beside it.
     m.sheet = None;
     m.flash = None;
-    click(&mut m, MouseKind::Down(Button::Left), x + 6, head + 1);
+    click(&mut m, MouseKind::Down(Button::Left), x + 6, head);
     assert!(m.flash.is_none());
 }
 
@@ -610,7 +610,7 @@ fn the_handle_after_the_name() {
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     let top = m.session.as_ref().unwrap().top;
     let off = m.session.as_ref().unwrap().top_off;
-    let name = &rows[top - crate::session::HEAD_H - off + 1];
+    let name = &rows[top - crate::session::HEAD_H - off];
     let a = m.agents[0].clone();
     let h = super::agent::name_handle(&a).text;
     assert!(h.starts_with('@'), "{h:?}");
@@ -735,8 +735,12 @@ fn the_header_segments_are_a_click_away() {
         let head = top - crate::session::HEAD_H - m.session.as_ref().unwrap().top_off;
         let hits = m.kept::<State>().hits.clone();
         for &(row, f, t, act) in &hits.segs {
-            let cells: Vec<char> = rows[head + row].chars().collect();
-            let s: String = cells[2 + f..2 + t].iter().collect();
+            // The meta row's that had no room along the tabs' aren't drawn.
+            let Some((x0, y0)) = drawn(&m, head, row, 2 + f) else {
+                continue;
+            };
+            let cells: Vec<char> = rows[y0].chars().collect();
+            let s: String = cells[x0..x0 + (t - f)].iter().collect();
             match act {
                 HeadAct::Model => assert!(s.to_lowercase().contains("opus"), "w {w}: {s:?}"),
                 HeadAct::Effort => assert_eq!(s, "high", "w {w}"),
@@ -753,16 +757,17 @@ fn the_header_segments_are_a_click_away() {
         let Some(&(row, f, t, act)) = hits.segs.iter().find(|h| h.3 == HeadAct::Model) else {
             continue;
         };
+        let Some((x0, y0)) = drawn(&m, head, row, 2 + f) else {
+            continue;
+        };
+        let x1 = x0 + (t - f);
         // Lit under the pointer, and only there.
-        assert_eq!(
-            click(&mut m, MouseKind::Moved, 2 + f, head + row),
-            Out::Draw
-        );
-        let lit = m.frame()[head + row].clone();
+        assert_eq!(click(&mut m, MouseKind::Moved, x0, y0), Out::Draw);
+        let lit = m.frame()[y0].clone();
         let mut x = 0;
         for s in &lit.spans {
             if s.style.bg == crate::style::HOVER_BG {
-                assert!(x >= 2 + f && x + s.width() <= 2 + t, "w {w}: {s:?} at {x}");
+                assert!(x >= x0 && x + s.width() <= x1, "w {w}: {s:?} at {x}");
             }
             x += s.width();
         }
@@ -772,14 +777,28 @@ fn the_header_segments_are_a_click_away() {
                 .any(|s| s.style.bg == crate::style::HOVER_BG),
             "w {w}"
         );
-        assert_eq!(click(&mut m, MouseKind::Moved, 0, head + row), Out::Draw);
+        assert_eq!(click(&mut m, MouseKind::Moved, 0, y0), Out::Draw);
         assert!(m.kept::<State>().hover_seg.is_none());
         // A click opens what /model opens, or says why it can't.
         assert_eq!(act, HeadAct::Model);
-        click(&mut m, MouseKind::Down(Button::Left), t - 1 + 2, head + row);
+        click(&mut m, MouseKind::Down(Button::Left), x1 - 1, y0);
         assert!(
             m.sheet.is_some() || m.flash.is_some(),
             "w {w}: nothing came of it"
         );
     }
+}
+
+/// Where a cell of the header's built rows is drawn (session::fold_head):
+/// the name's row as built at `head`, the meta row's along the tabs' row
+/// under it; None for a cell that had no room.
+fn drawn(m: &crate::model::Model, head: usize, row: usize, x: usize) -> Option<(usize, usize)> {
+    if row == 1 {
+        return Some((x, head));
+    }
+    let v = m.session.as_ref()?;
+    v.meta_map
+        .iter()
+        .find(|s| x >= 2 + s.1 && x < 2 + s.1 + s.2)
+        .map(|s| (2 + s.0 + (x - 2 - s.1), head + 1))
 }

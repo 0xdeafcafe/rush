@@ -1000,7 +1000,8 @@ fn clicks_miss_a_card_out_of_sight() {
     let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
     m.cards().host = Some(super::cards_host::host());
     m.w = 100;
-    m.h = 30;
+    // The conversation's rows as at 30 under Go's taller headers.
+    m.h = 22;
     let now = m.now;
     let end = rush_core::event::Event::TurnEnd(rush_core::event::TurnEnd::default());
     for i in 0..30 {

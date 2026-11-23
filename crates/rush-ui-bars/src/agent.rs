@@ -1126,15 +1126,18 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
     // Drawn as two (session::fold_head): the name's row as built, and
     // the meta row's left part moved right along the tabs' row. The
     // pointer is put back where the built rows have it.
-    let (off, meta_dx, meta_w) = m
+    let (off, map) = m
         .session
         .as_ref()
-        .map_or((0, None, 0), |v| (v.top_off, v.meta_dx, v.meta_w));
+        .map_or((0, Vec::new()), |v| (v.top_off, v.meta_map.clone()));
     let name_y = top.checked_sub(crate::session::HEAD_H + off);
-    let (built, x) = match (name_y, meta_dx) {
-        (Some(t), _) if y == t => (Some(NAME_ROW), x),
-        (Some(t), Some(d)) if y == t + 1 && x >= 2 + d + 2 && x - d < 2 + meta_w => {
-            (Some(META_ROW), x - d)
+    let (built, x) = match name_y {
+        Some(t) if y == t => (Some(NAME_ROW), x),
+        Some(t) if y == t + 1 && x >= 2 => {
+            match map.iter().find(|s| x - 2 >= s.0 && x - 2 < s.0 + s.2) {
+                Some(s) => (Some(META_ROW), 2 + s.1 + (x - 2 - s.0)),
+                None => (None, x),
+            }
         }
         _ => (None, x),
     };

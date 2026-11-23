@@ -1,21 +1,21 @@
-     !
-    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
-    RUSH      Agents   Wall   [ ]
-   ▀▀▀▀▀▀
-────────────────────────────────────────────────────────────────────────────────
-
+  rush   ● 1 needs   ✻ 2    Agents   Projects   Harnesses   Settings
     set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
-    checkout · main    Claude Code · open in a terminal · /rush copies it here
-    Conversation ▾   Overview   Changes    [ ] views      esc back to the list
-───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
-  ▍ first   fix the test
+    Conversation ▾   Overview   Changes    [ ] views           checkout · main
+
+  ▍ You  12:00
+  ▍ fix the test
 
   ▍ Claude  12:00 · @set-up-caching-for-ci
   │   ✓ cargo test                                                         7s
   ▍
   ▍ Fixed it.
   ▍                                                              1 step   13s
+
+
+
+
+
+
 
 
   ╭─ open in a terminal, so it can't take messages here ──────────────────────╮

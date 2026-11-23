@@ -5,11 +5,11 @@
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                   COS╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮
-┃ Needs you  1 · $0.19                         │ ❯ ▏find a key by its keys or what it does                                                   140 keys │
-▌ └─ ? fix the flaky tax rounding test ✻   $0.1│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │ode · open in a terminal · /rush copies it here
-▌      checkout · main                         │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │
-▌        ╰ asks: Round half up, or half to even│ ▍ ↑                     the agent above                                                              │─────────────────────────────────────────────────
-                                               │   ↓                     the agent below                                                              │                                     ▌
+┃ Needs you  1 · $0.19                         │ ❯ ▏find a key by its keys or what it does                                                   140 keys │                                checkout · main
+▌ └─ ? fix the flaky tax rounding test ✻   $0.1│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │                                     ▌
+▌      checkout · main                         │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │                                     │
+▌        ╰ asks: Round half up, or half to even│ ▍ ↑                     the agent above                                                              │                                     │
+                                               │   ↓                     the agent below                                                              │                                     │
 ┃ Working  2 · $5.72                           │   pgup                  ten agents up                                                                │                                     │
 ┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.6│   pgdown                ten agents down                                                              │                                     │
 ┃ │    checkout · feat/apple-pay               │   home · shift+↑        the first agent                                                              │                                     │

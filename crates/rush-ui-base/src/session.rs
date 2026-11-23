@@ -190,19 +190,22 @@ pub const HEAD_BUILT: usize = 5;
 
 /// The header's five built rows as the two drawn, w wide: the name's row
 /// as it is, and the tabs (their first `tabs_w` cells) with the meta
-/// row's left part (its first `meta_w` cells, less its indent) at their
-/// right, when both fit; the blank row only when it says something (a
-/// hosted child's breadcrumb); the rule never. Also how far right the
-/// meta row's cells went, for the pointer (None: not drawn), and whether
-/// the breadcrumb's row is there. 0 for a width takes the row's own.
+/// row at their right: its left part (its first `meta_w` cells, less its
+/// indent) and what's at its right edge (the label, how it's reached),
+/// brought together; the right part goes first for room, then the left.
+/// The blank row only when it says something (a hosted child's
+/// breadcrumb); the rule never. Also where the meta row's cells went,
+/// for the pointer: (drawn from, built from, cells), in the rows'
+/// content; and whether the breadcrumb's row is there. 0 for a width
+/// takes the row's own.
 pub fn fold_head(
     rows: Vec<Line>,
     tabs_w: usize,
     meta_w: usize,
     w: usize,
-) -> (Vec<Line>, Option<usize>, bool) {
+) -> (Vec<Line>, Vec<(usize, usize, usize)>, bool) {
     if rows.len() < HEAD_BUILT {
-        return (rows, None, false);
+        return (rows, Vec::new(), false);
     }
     let iw = w.saturating_sub(3);
     let inner = |l: &Line| cut(l, 2, 2 + iw);
@@ -218,14 +221,29 @@ pub fn fold_head(
     } else {
         used(&meta)
     };
+    // The left part's cells from its indent on; the right part's, from
+    // its first that says something.
+    let lw = mw.saturating_sub(2);
+    let rest = cut(&meta, mw, iw).plain();
+    let lead = rest.len() - rest.trim_start_matches(' ').len();
+    let rw = width(rest.trim_end()).saturating_sub(lead);
+    let r0 = mw + lead;
     let mut row = cut(&tabs, 0, tw);
-    let mut dx = None;
-    // The meta's cells from its indent on, a cell before the right edge.
-    if mw > 2 && tw + mw + 2 <= iw {
-        let at = iw - (mw - 2) - 1;
-        row.spans.push(plain(blanks(at - tw)));
-        join(&mut row, cut(&meta, 2, mw));
-        dx = Some(at - 2);
+    let mut map = Vec::new();
+    let mut put = |row: &mut Line, at: usize, from: usize, n: usize| {
+        let have = row.width();
+        row.spans.push(plain(blanks(at.saturating_sub(have))));
+        join(row, cut(&meta, from, from + n));
+        map.push((at, from, n));
+    };
+    let both = lw > 0 && rw > 0 && tw + 2 + lw + 3 + rw + 1 <= iw;
+    if both {
+        put(&mut row, iw - rw - 1 - 3 - lw, 2, lw);
+        put(&mut row, iw - rw - 1, r0, rw);
+    } else if lw > 0 && tw + 2 + lw + 1 <= iw {
+        put(&mut row, iw - lw - 1, 2, lw);
+    } else if lw == 0 && rw > 0 && tw + 2 + rw + 1 <= iw {
+        put(&mut row, iw - rw - 1, r0, rw);
     }
     let mut folded = line([Span::new("  ", Style::default().on(CHROME_BG))]);
     join(&mut folded, on_ground(row, iw, CHROME_BG));
@@ -241,7 +259,7 @@ pub fn fold_head(
     }
     out.extend(rows.next());
     out.push(folded);
-    (out, dx, crumb)
+    (out, map, crumb)
 }
 
 /// Where the view is: following the conversation's end, or scrolled up to
@@ -299,10 +317,10 @@ pub struct SessionView {
     /// `fold_head` (0: not said), set by who draws them.
     pub tabs_w: usize,
     pub meta_w: usize,
-    /// How far right the meta row's cells are drawn, on the tabs' row
-    /// (None: they had no room), and whether a breadcrumb's row is over
-    /// the name's.
-    pub meta_dx: Option<usize>,
+    /// Where the meta row's cells are drawn on the tabs' row: (drawn
+    /// from, built from, cells) in the rows' content, none when they had
+    /// no room; and whether a breadcrumb's row is over the name's.
+    pub meta_map: Vec<(usize, usize, usize)>,
     pub crumb_row: bool,
     /// Columns kept at the right of the conversation for what's drawn
     /// beside it (the map): the conversation is drawn that much narrower.
@@ -372,7 +390,7 @@ impl SessionView {
             top_off: 0,
             tabs_w: 0,
             meta_w: 0,
-            meta_dx: None,
+            meta_map: Vec::new(),
             crumb_row: false,
             side: 0,
             beside: false,

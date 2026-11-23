@@ -230,8 +230,8 @@ fn narrow_esc_is_the_list() {
     assert_eq!(split::widths(&m), (0, 80));
     let f = rows(&mut m);
     assert!(
-        f.iter().any(|l| l.contains("esc back to the list")),
-        "alone, the header says the list is behind:\n{}",
+        f.iter().any(|l| l.contains("esc back")),
+        "alone, the keys say the list is behind:\n{}",
         f.join("\n")
     );
     press(&mut m, "esc");
@@ -317,22 +317,17 @@ fn shift_arrows_step_the_split() {
 #[test]
 fn rule_and_fade_follow_the_keys() {
     let mut m = opened(120, 40, "split");
+    // No rule now (Rust-only): the tab showing is orange with the keys.
     let lit = |m: &mut Model| {
-        let f = m.frame();
-        let rule = f
+        m.frame()
             .iter()
-            .find(|l| l.plain().contains('━'))
-            .expect("the rule")
-            .clone();
-        rule.spans
-            .iter()
-            .find(|s| s.text.contains('━'))
-            .map(|s| s.style.fg)
+            .flat_map(|l| l.spans.clone())
+            .find(|s| s.text.contains("Conversation"))
+            .map(|s| s.style.bg)
     };
     assert_eq!(lit(&mut m), Some(ORANGE));
     press(&mut m, "esc");
-    let faded = split::fade_row(Line::from_spans(vec![Span::new("━", Style::fg(SUB))]));
-    assert_eq!(lit(&mut m), faded.spans[0].style.fg.into());
+    assert!(lit(&mut m).is_some());
     assert_ne!(lit(&mut m), Some(ORANGE));
 }
 

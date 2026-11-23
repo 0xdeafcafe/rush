@@ -124,7 +124,10 @@ impl Model {
         let places = left.plain();
         let places_w = left.width();
         let room = w.saturating_sub(places_w + 3 + right_w);
-        let pages = self.pages_line(room);
+        // The pages whole or not at all: [ and ] still go through them.
+        let pages = Some(self.pages_line(w))
+            .filter(|p| p.width() <= room)
+            .unwrap_or_default();
         if pages.width() > 0 {
             left.spans.push(plain("   "));
             join(&mut left, pages);

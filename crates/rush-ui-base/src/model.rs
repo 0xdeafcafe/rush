@@ -1234,9 +1234,9 @@ impl Model {
             .session
             .as_ref()
             .map_or((0, 0), |v| (v.tabs_w, v.meta_w));
-        let (mut head, meta_dx, crumb_row) = session::fold_head(head, tabs_w, meta_w, w);
+        let (mut head, meta_map, crumb_row) = session::fold_head(head, tabs_w, meta_w, w);
         if let Some(v) = self.session.as_mut() {
-            (v.meta_dx, v.crumb_row) = (meta_dx, crumb_row);
+            (v.meta_map, v.crumb_row) = (meta_map, crumb_row);
         }
         if let Some(kind) = kind {
             crate::frame::headerwash::wash_head(&self.reg, &kind, &mut head, w);

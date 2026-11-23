@@ -186,16 +186,26 @@ fn tabs_and_the_rule_under_them() {
     let mut m = opened(120, 40);
     let s = screen(&mut m);
     let tabs = row_with(&mut m, "Conversation").expect("a tabs row");
-    assert_eq!(
-        s[tabs].trim_end(),
-        "    Conversation ▾   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views                         esc back to the list"
+    assert!(
+        s[tabs].starts_with(
+            "    Conversation ▾   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views   "
+        ),
+        "{:?}",
+        s[tabs]
     );
+    assert!(s[tabs].contains("checkout · main"), "{:?}", s[tabs]);
+    // No rule under them (Rust-only): the tab showing is the lit one.
     let lit = |m: &mut Model| -> (usize, usize) {
-        let r = screen(m)[tabs + 1].clone();
-        let cs: Vec<char> = r.chars().collect();
-        let from = cs.iter().position(|c| *c == '━').unwrap();
-        let n = cs.iter().filter(|c| **c == '━').count();
-        (from, n)
+        let r = m.frame()[tabs].clone();
+        let (mut x, mut from, mut n) = (0, None, 0);
+        for s in &r.spans {
+            if s.style.bg == crate::style::ORANGE || s.style.bg == crate::style::TAB_ON_BG {
+                from.get_or_insert(x);
+                n += s.width();
+            }
+            x += s.width();
+        }
+        (from.expect("a lit tab"), n)
     };
     assert_eq!(lit(&mut m), (3, " Conversation ▾ ".chars().count()));
     press(&mut m, "]");
@@ -1193,7 +1203,9 @@ fn ours_through_a_symlink() {
 #[test]
 fn prompt_pins() {
     let fake = Fake::new();
-    let mut m = open(agent("steer", State::Idle), &fake, 123, 36);
+    // 28 rows: the conversation has what it had at 36 under Go's taller
+    // headers (eight rows more).
+    let mut m = open(agent("steer", State::Idle), &fake, 123, 28);
     long(&mut m, 30);
     let s = screen(&mut m);
     assert!(!s.iter().any(|l| l.contains("current question")));
