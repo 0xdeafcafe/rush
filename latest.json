@@ -1,8 +1,8 @@
 {
  "commit": "5665e1f7b15da00f07afc9bdf000cf4af85278af",
  "ref": "main",
- "run": "45327101096",
- "at": "2026-11-24T05:04:58Z",
+ "run": "45547456410",
+ "at": "2026-11-25T05:13:15Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
@@ -67,27 +67,27 @@
   },
   "frame, the list: rows (Model::frame), allocations": {
    "kind": "allocs",
-   "value": 2595
+   "value": 2594
   },
   "frame, the list: rows (Model::frame), bytes": {
    "kind": "bytes",
-   "value": 487571
+   "value": 487538
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.123
+   "value": 0.108
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3917120
+   "value": 3900672
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0011
+   "value": 0.0015
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
-   "value": 1.0
+   "value": 2.0
   },
   "host: threads": {
    "kind": "threads",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.132
+   "value": 0.196
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 13714688
+   "value": 13829376
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.039
+   "value": 0.071
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4867328
+   "value": 4883712
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0153
+   "value": 0.0167
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 15.8
+   "value": 18.7
   },
   "plugind: threads": {
    "kind": "threads",
@@ -523,7 +523,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.304
+   "value": 0.339
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -531,15 +531,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6538432
+   "value": 6554880
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.2908
+   "value": 0.489
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 64.0
+   "value": 92.4
   },
   "serve: threads": {
    "kind": "threads",
@@ -547,19 +547,19 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 1.992
+   "value": 2.266
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 33949184
+   "value": 30705088
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.2843
+   "value": 0.3507
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 198.0
+   "value": 242.7
   },
   "ui: threads": {
    "kind": "threads",
@@ -572,13 +572,14 @@
    "threads seen": [
     9
    ],
-   "ps cpu over the window": 0.01
+   "ps cpu over the window": 0.02
   },
   "serve": {
    "threads seen": [
-    7
+    7,
+    9
    ],
-   "ps cpu over the window": 0.3
+   "ps cpu over the window": 0.5
   },
   "host": {
    "threads seen": [
@@ -597,9 +598,9 @@
     8,
     9,
     10,
-    13
+    12
    ],
-   "ps cpu over the window": 0.29
+   "ps cpu over the window": 0.35
   }
  }
 }
