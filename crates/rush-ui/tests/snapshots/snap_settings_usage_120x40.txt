@@ -26,14 +26,14 @@
       after                        ‹ 3 in a row   ›                         │ the time below, with a context worth
     Trim command output            ‹ on           ›                         │ it; never one asleep, done, held, or
       longer than                  ‹ 600 lines    ›                         │ on an account past its pace, nor while
-    Shrink images agents read      ‹ on           ›                         │ you're away. Each is in the session's
-      images cost at most          ‹ 1,568 tokens ›                         │ events as cache-kept, with its cost.
-      contact sheet after          ‹ 8 images     ›                         │
-                                                                            │ on: idle sessions' caches are kept for
-  Emeritus · off until you turn it on; reaches a running agent at its next… │ the time below, then lapse.
-    Hand over near the end of con… ‹ off          ›                         │
+      or more than                 ‹ 16 KB        ›                         │ you're away. Each is in the session's
+    Shrink images agents read      ‹ on           ›                         │ events as cache-kept, with its cost.
+      images cost at most          ‹ 1,568 tokens ›                         │
+      contact sheet after          ‹ 8 images     ›                         │ on: idle sessions' caches are kept for
+    Stop messaging full subagents  ‹ over 150k t… ›                         │ the time below, then lapse.
+    Subagents that name no model   ‹ Sonnet       ›                         │
                                                                             │
-  Cheaper subagents · off until you turn it on                              │
-    1 of 25 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  Emeritus · off until you turn it on; reaches a running agent at its next… │
+    1 of 28 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -108,7 +108,7 @@ pub fn manifest() -> Manifest {
                 "Squeeze command output",
                 "Takes terminal colours and codes, progress bars' redraws, spaces at line ends, runs of blank lines \
                  and repeated lines out of a shell command's output before the agent sees it, and cuts one over 600 lines \
-                 or 32 KB (as set) to its first and last third (the whole kept in a file it's pointed to). The output of \
+                 or 16 KB (as set) to its first and last third (the whole kept in a file it's pointed to). The output of \
                  cat, sed, git diff, rg and the like, whose exact spaces an edit needs, is only cut",
             ),
             pick(
@@ -144,7 +144,7 @@ pub fn manifest() -> Manifest {
                 SQUEEZE_KB,
                 "Or more than",
                 SQUEEZE_KB_CHOICES,
-                "32",
+                "16",
                 "Output over this many KB keeps a third of them at each end, the whole kept in a file; the output \
                  of cat, sed and the like too, its bytes otherwise as they came",
             ),

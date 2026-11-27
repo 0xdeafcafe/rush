@@ -4853,7 +4853,7 @@ value its choices don't allow, is today's number:
 | ‧ after | `repeat-after` | 2, 3, 5 in a row | 3 |
 | Trim command output | `squeeze` | on, off | on |
 | ‧ longer than | `squeeze-lines` | 300, 600, 1,200 lines (a third kept at each end) | 600: first and last 200 |
-| ‧ or more than | `squeeze-kb` | 16, 32, 64 KB (a third kept at each end) | 32 KB |
+| ‧ or more than | `squeeze-kb` | 16, 32, 64 KB (a third kept at each end) | 16 KB |
 | Shrink images agents read | `images` | on, off | on |
 | ‧ images cost at most | `image-tokens` | 800, 1,568, 3,000 tokens | 1,568 |
 | ‧ contact sheet after | `sheet-after` | 4, 8, 16 images | 8 |

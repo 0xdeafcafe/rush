@@ -15,7 +15,7 @@ pub const CAP_LINES: usize = 600;
 pub const KEEP_LINES: usize = 200;
 /// Past this many bytes, an output is cut too, to a third of them at each
 /// end: long lines (a compiler's, a minified file) pass a line count.
-pub const CAP_BYTES: usize = 32 * 1024;
+pub const CAP_BYTES: usize = 16 * 1024;
 
 /// s without its terminal codes: colours, cursor moves, titles.
 pub fn strip_ansi(s: &str) -> String {
