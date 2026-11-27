@@ -13,6 +13,9 @@ use crate::gatecore;
 pub const CAP_LINES: usize = 600;
 /// How many lines of each end a cut output keeps.
 pub const KEEP_LINES: usize = 200;
+/// Past this many bytes, an output is cut too, to a third of them at each
+/// end: long lines (a compiler's, a minified file) pass a line count.
+pub const CAP_BYTES: usize = 32 * 1024;
 
 /// s without its terminal codes: colours, cursor moves, titles.
 pub fn strip_ansi(s: &str) -> String {
@@ -124,24 +127,96 @@ pub fn squeeze(output: &str) -> String {
 }
 
 /// output cut to its first and last keep lines when it has more than
-/// over (as set: CAP_LINES and KEEP_LINES unless), saying where the whole
-/// of it is kept; None when it's short enough.
-pub fn cap(output: &str, kept_at: &str, over: usize, keep: usize) -> Option<String> {
+/// over, and to a third of max_bytes at each end when it's longer than
+/// that (as set: CAP_LINES, KEEP_LINES, CAP_BYTES unless), saying where the
+/// whole of it is kept; None when it's short enough. A byte cut ends at a
+/// line's end where one is near enough, else inside the line.
+pub fn cap(
+    output: &str,
+    kept_at: &str,
+    over: usize,
+    keep: usize,
+    max_bytes: usize,
+) -> Option<String> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
-    if lines.len() <= over {
+    let by_lines = lines.len() > over;
+    if !by_lines && output.len() <= max_bytes {
         return None;
     }
-    let keep = keep.min(over / 2);
-    let left = lines.len() - 2 * keep;
-    let mut out: String = lines[..keep].concat();
-    if !out.ends_with('\n') {
+    let (mut head, mut tail) = (output.len(), 0);
+    if by_lines {
+        let keep = keep.min(over / 2);
+        head = lines[..keep].iter().map(|l| l.len()).sum();
+        tail = output.len()
+            - lines[lines.len() - keep..]
+                .iter()
+                .map(|l| l.len())
+                .sum::<usize>();
+    }
+    let budget = max_bytes / 3;
+    let mut by_bytes = false;
+    if output.len() > max_bytes {
+        if head > budget {
+            let mut at = floor(output, budget);
+            if let Some(nl) = output[..at].rfind('\n')
+                && nl + 1 > budget / 2
+            {
+                at = nl + 1;
+            }
+            head = at;
+            by_bytes = true;
+        }
+        if output.len() - tail > budget {
+            let from = ceil(output, output.len() - budget);
+            let mut at = from;
+            if let Some(nl) = output[from..].find('\n')
+                && nl < budget / 2
+                && from + nl + 1 < output.len()
+            {
+                at = from + nl + 1;
+            }
+            tail = at;
+            by_bytes = true;
+        }
+    }
+    if tail <= head {
+        return None;
+    }
+    let gone = &output[head..tail];
+    let mut out = output[..head].to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str(&format!(
-        "… {left} lines left out (the whole output: {kept_at}) …\n"
-    ));
-    out.push_str(&lines[lines.len() - keep..].concat());
+    if by_bytes {
+        let n = gone.matches('\n').count();
+        out.push_str(&format!(
+            "… {n} lines, {} KB, left out (the whole output: {kept_at}) …\n",
+            gone.len().div_ceil(1024)
+        ));
+    } else {
+        let left = lines.len() - 2 * keep.min(over / 2);
+        out.push_str(&format!(
+            "… {left} lines left out (the whole output: {kept_at}) …\n"
+        ));
+    }
+    out.push_str(&output[tail..]);
     Some(out)
+}
+
+/// The char boundary at or before i.
+fn floor(s: &str, mut i: usize) -> usize {
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// The char boundary at or after i.
+fn ceil(s: &str, mut i: usize) -> usize {
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 /// Whether a command's output is squeezed: not when what it prints is a
@@ -343,9 +418,12 @@ mod tests {
     #[test]
     fn caps_long_output() {
         let short: String = (0..CAP_LINES).map(|i| format!("{i}\n")).collect();
-        assert_eq!(cap(&short, "/tmp/x", CAP_LINES, KEEP_LINES), None);
+        assert_eq!(
+            cap(&short, "/tmp/x", CAP_LINES, KEEP_LINES, CAP_BYTES),
+            None
+        );
         let long: String = (0..1000).map(|i| format!("line {i}\n")).collect();
-        let got = cap(&long, "/tmp/out.txt", CAP_LINES, KEEP_LINES).unwrap();
+        let got = cap(&long, "/tmp/out.txt", CAP_LINES, KEEP_LINES, CAP_BYTES).unwrap();
         let lines: Vec<&str> = got.lines().collect();
         assert_eq!(lines.len(), 2 * KEEP_LINES + 1);
         assert_eq!(lines[0], "line 0");
@@ -367,9 +445,94 @@ mod tests {
         ];
         for &(n, over, keep, want) in cases {
             let out: String = (0..n).map(|i| format!("line {i}\n")).collect();
-            let got = cap(&out, "/tmp/o", over, keep).map(|c| c.lines().count());
+            let got = cap(&out, "/tmp/o", over, keep, CAP_BYTES).map(|c| c.lines().count());
             assert_eq!(got, want, "{n} lines, over {over}, keep {keep}");
         }
+    }
+
+    #[test]
+    fn caps_long_output_by_bytes() {
+        // Output; the cap in bytes; the lines kept before the note, its
+        // words, and the bytes after it; None: left as it is.
+        type Case = (
+            &'static str,
+            String,
+            usize,
+            Option<(usize, &'static str, usize)>,
+        );
+        let wide = |n: usize| -> String {
+            (0..n)
+                .map(|i| format!("{i:04} {}\n", "x".repeat(95)))
+                .collect()
+        };
+        let cases: Vec<Case> = vec![
+            ("short enough", wide(100), 16 * 1024, None),
+            ("just at the cap", "a".repeat(16 * 1024), 16 * 1024, None),
+            (
+                // 300 lines of 100 bytes: under the line cap, over 16 KB.
+                "long lines under the line cap",
+                wide(300),
+                16 * 1024,
+                Some((
+                    54,
+                    "… 192 lines, 19 KB, left out (the whole output: /tmp/o) …",
+                    5454,
+                )),
+            ),
+            (
+                "one huge line is cut inside it",
+                "y".repeat(100_000),
+                32 * 1024,
+                Some((
+                    1,
+                    "… 0 lines, 77 KB, left out (the whole output: /tmp/o) …",
+                    10922,
+                )),
+            ),
+            (
+                "over both caps: the bytes win",
+                wide(1000),
+                32 * 1024,
+                Some((
+                    108,
+                    "… 784 lines, 78 KB, left out (the whole output: /tmp/o) …",
+                    10908,
+                )),
+            ),
+            (
+                "over the lines only: cut by lines",
+                (0..1000).map(|i| format!("{i}\n")).collect(),
+                32 * 1024,
+                Some((
+                    200,
+                    "… 600 lines left out (the whole output: /tmp/o) …",
+                    800,
+                )),
+            ),
+        ];
+        for (what, out, max, want) in cases {
+            let got = cap(&out, "/tmp/o", CAP_LINES, KEEP_LINES, max);
+            let got = got.map(|c| {
+                let (i, note) = c
+                    .lines()
+                    .enumerate()
+                    .find(|(_, l)| l.starts_with("… "))
+                    .unwrap();
+                let after = c.split_once(&format!("{note}\n")).unwrap().1.len();
+                // What's kept is the output's own start and end.
+                let head = c.split_once("… ").unwrap().0;
+                assert!(out.starts_with(head.trim_end_matches('\n')), "{what}: head");
+                assert!(out.ends_with(&c[c.len() - after..]), "{what}: tail");
+                assert!(c.len() <= max, "{what}: {} bytes", c.len());
+                (i, note.to_string(), after)
+            });
+            let want = want.map(|(i, n, a)| (i, n.to_string(), a));
+            assert_eq!(got, want, "{what}");
+        }
+        // A cut never splits a character.
+        let s = "é".repeat(40_000);
+        let c = cap(&s, "/tmp/o", CAP_LINES, KEEP_LINES, CAP_BYTES).unwrap();
+        assert!(c.starts_with('é') && c.ends_with('é'));
     }
 
     #[test]

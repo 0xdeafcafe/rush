@@ -31,6 +31,11 @@ pub const BATCH: usize = 3;
 pub const SMALL_IMAGE_TOKENS: u64 = 256;
 /// A read under way this long (seconds) is taken as never finished.
 pub const LOOKING_FOR: u64 = 120;
+/// A subagent whose context holds more than this many tokens isn't sent
+/// another message: each one re-sends all of it.
+pub const LANE_CAP: u64 = 150_000;
+/// The model an Agent call that names none is given.
+pub const AGENT_MODEL: &str = "sonnet";
 
 /// Which rules are on, and their numbers as set (Settings › Usage ›
 /// Context guard): each the constant above unless set otherwise.
@@ -51,6 +56,15 @@ pub struct Rules {
     /// keep_lines (squeeze's CAP_LINES, KEEP_LINES).
     pub cap_lines: usize,
     pub keep_lines: usize,
+    /// And output past this many bytes, to a third of them at each end
+    /// (squeeze's CAP_BYTES).
+    pub cap_bytes: usize,
+    /// A message to a subagent past this many tokens of context is
+    /// refused; 0: never.
+    pub lane_cap: u64,
+    /// An Agent call that names no model, of a Claude type with no model of
+    /// its own, is given AGENT_MODEL.
+    pub agent_model: bool,
     /// Images read as a smaller WebP copy, and pointed to a contact sheet.
     pub images: bool,
     /// The most visual tokens a copy costs (images::TOKENS).
@@ -72,6 +86,9 @@ impl Rules {
         repeats: REPEATS,
         cap_lines: crate::contextguard::squeeze::CAP_LINES,
         keep_lines: crate::contextguard::squeeze::KEEP_LINES,
+        cap_bytes: crate::contextguard::squeeze::CAP_BYTES,
+        lane_cap: LANE_CAP,
+        agent_model: true,
         images: true,
         image_tokens: crate::contextguard::images::TOKENS,
         sheet_after: SHEET_AFTER,
@@ -84,11 +101,19 @@ impl Rules {
         repeat: false,
         squeeze: false,
         images: false,
+        lane_cap: 0,
+        agent_model: false,
         ..Rules::ALL
     };
 
     pub fn any(&self) -> bool {
-        self.reread || self.big_read || self.repeat || self.squeeze || self.images
+        self.reread
+            || self.big_read
+            || self.repeat
+            || self.squeeze
+            || self.images
+            || self.lane_cap > 0
+            || self.agent_model
     }
 }
 
@@ -597,6 +622,140 @@ pub fn tail(output: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// What the guard says of a message to a subagent (agent: its name or
+/// id) whose context holds tokens: refused past the cap, as each message
+/// re-sends all of it; None to let it through, or when it isn't known (0).
+pub fn lane(rules: Rules, agent: &str, tokens: u64) -> Option<Refusal> {
+    if rules.lane_cap == 0 || tokens <= rules.lane_cap {
+        return None;
+    }
+    Some(Refusal {
+        rule: "lane-cap",
+        why: format!(
+            "context-guard: {agent} is at {}k context; every resume re-sends all of it. Start a fresh agent \
+             with a short brief instead.",
+            (tokens + 500) / 1000
+        ),
+    })
+}
+
+/// How many tokens a Claude Code transcript's newest request sent (its
+/// input, cache writes and cache reads), from the transcript's end; None
+/// when no request in it says. A first line cut short is passed over.
+pub fn context_tokens(transcript: &str) -> Option<u64> {
+    for line in transcript.lines().rev() {
+        if !line.contains("\"usage\"") || !line.contains("\"assistant\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v["type"] != "assistant" {
+            continue;
+        }
+        let u = &v["message"]["usage"];
+        if !u.is_object() {
+            continue;
+        }
+        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        return Some(
+            n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens"),
+        );
+    }
+    None
+}
+
+/// What a subagent type is to the model rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentType {
+    /// One of Claude Code's own, or a definition of yours, that names no
+    /// model: it would run on the session's.
+    Unset,
+    /// A definition that names its own model, a model's own type (opus,
+    /// sonnet, haiku, fable…), or one that isn't Claude's (rush's other
+    /// models, a plugin's): left as it is.
+    Own,
+}
+
+/// Claude Code's own subagent types that run on the session's model.
+pub const UNSET_TYPES: &[&str] = &["", "general-purpose", "Plan", "claude"];
+
+/// The types that are a model, or run on a model of their own: never
+/// given another.
+pub const MODEL_TYPES: &[&str] = &["opus", "opus-1m", "fable", "sonnet", "haiku", "Explore"];
+
+/// The model the guard gives an Agent call (its tool_input) that names
+/// none, when its type (as the hook found it) runs on the session's: None
+/// to leave it as it is.
+pub fn agent_model(
+    rules: Rules,
+    input: &serde_json::Value,
+    kind: AgentType,
+) -> Option<&'static str> {
+    if !rules.agent_model || kind != AgentType::Unset {
+        return None;
+    }
+    let model = input.get("model").and_then(|m| m.as_str()).unwrap_or("");
+    if !model.trim().is_empty() {
+        return None;
+    }
+    let t = input
+        .get("subagent_type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    if MODEL_TYPES.contains(&t) {
+        return None;
+    }
+    Some(AGENT_MODEL)
+}
+
+/// Whether an agent definition (its .md, frontmatter first) names a model
+/// of its own: "inherit", or none, runs on the session's.
+pub fn names_model(def: &str) -> bool {
+    let mut lines = def.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return false;
+    }
+    for l in lines {
+        let l = l.trim();
+        if l == "---" {
+            break;
+        }
+        if let Some(v) = l.strip_prefix("model:") {
+            let v = v.trim().trim_matches(['"', '\'']);
+            return !v.is_empty() && v != "inherit";
+        }
+    }
+    false
+}
+
+/// The tool_use id of the newest Agent call in a transcript that named its
+/// run name; None when there's none.
+pub fn call_named(transcript: &str, name: &str) -> Option<String> {
+    let quoted = serde_json::to_string(name).ok()?;
+    for line in transcript.lines().rev() {
+        if !line.contains("\"tool_use\"") || !line.contains(&quoted) {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(blocks) = v["message"]["content"].as_array() else {
+            continue;
+        };
+        for b in blocks.iter().rev() {
+            if b["type"] == "tool_use"
+                && (b["name"] == "Agent" || b["name"] == "Task")
+                && b["input"]["name"] == name
+                && let Some(id) = b["id"].as_str()
+            {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1215,5 +1374,206 @@ mod tests {
             panic!("refused");
         };
         assert_eq!(nudge, "", "the two before are long gone");
+    }
+
+    #[test]
+    fn lanes_past_the_cap() {
+        // The cap, the lane's tokens; the words of the refusal, or None.
+        let cases: &[(u64, u64, Option<&str>)] = &[
+            (LANE_CAP, 0, None),
+            (LANE_CAP, 120_000, None),
+            (LANE_CAP, 150_000, None),
+            (
+                LANE_CAP,
+                150_001,
+                Some(
+                    "context-guard: lane-a is at 150k context; every resume re-sends all of it. Start a fresh \
+                     agent with a short brief instead.",
+                ),
+            ),
+            (
+                100_000,
+                231_600,
+                Some(
+                    "context-guard: lane-a is at 232k context; every resume re-sends all of it. Start a fresh \
+                     agent with a short brief instead.",
+                ),
+            ),
+            (250_000, 231_600, None),
+            // Off.
+            (0, 900_000, None),
+        ];
+        for &(cap, tokens, want) in cases {
+            let rules = Rules {
+                lane_cap: cap,
+                ..Rules::ALL
+            };
+            let got = lane(rules, "lane-a", tokens);
+            assert_eq!(got.as_ref().map(|r| r.why.as_str()), want, "{cap} {tokens}");
+            if let Some(r) = got {
+                assert_eq!(r.rule, "lane-cap");
+            }
+        }
+    }
+
+    #[test]
+    fn context_from_a_transcript() {
+        let a = |i: u64, cw: u64, cr: u64| {
+            format!(
+                r#"{{"type":"assistant","message":{{"usage":{{"input_tokens":{i},"cache_creation_input_tokens":{cw},"cache_read_input_tokens":{cr},"output_tokens":9}}}}}}"#
+            )
+        };
+        let user = r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"\"usage\" assistant"}]}}"#;
+        let cases: Vec<(&str, String, Option<u64>)> = vec![
+            ("empty", String::new(), None),
+            ("one request", a(2, 300, 1000), Some(1302)),
+            (
+                "the newest request counts",
+                [a(1, 1, 1), a(5, 0, 200_000)].join("\n"),
+                Some(200_005),
+            ),
+            (
+                "a tool result after it says nothing",
+                [a(5, 0, 200_000), user.into()].join("\n"),
+                Some(200_005),
+            ),
+            (
+                "a first line cut short is passed over",
+                format!(r#"x","type":"assistant","message":{{"usage":{{"input_tokens":3}}}}}}"#)
+                    + "\n"
+                    + user,
+                None,
+            ),
+        ];
+        for (what, text, want) in cases {
+            assert_eq!(context_tokens(&text), want, "{what}");
+        }
+    }
+
+    #[test]
+    fn agent_models() {
+        use serde_json::json;
+        // The call's input, its type as the hook found it, the rules; the
+        // model it's given.
+        let off = Rules {
+            agent_model: false,
+            ..Rules::ALL
+        };
+        let cases: Vec<(&str, serde_json::Value, AgentType, Rules, Option<&str>)> = vec![
+            (
+                "general-purpose, no model",
+                json!({"subagent_type": "general-purpose", "prompt": "x"}),
+                AgentType::Unset,
+                Rules::ALL,
+                Some("sonnet"),
+            ),
+            (
+                "no type at all",
+                json!({"prompt": "x"}),
+                AgentType::Unset,
+                Rules::ALL,
+                Some("sonnet"),
+            ),
+            (
+                "an empty model is none",
+                json!({"subagent_type": "Plan", "model": " "}),
+                AgentType::Unset,
+                Rules::ALL,
+                Some("sonnet"),
+            ),
+            (
+                "a model asked for is kept",
+                json!({"subagent_type": "general-purpose", "model": "opus"}),
+                AgentType::Unset,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "opus",
+                json!({"subagent_type": "opus"}),
+                AgentType::Unset,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "fable",
+                json!({"subagent_type": "fable"}),
+                AgentType::Unset,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "opus-1m",
+                json!({"subagent_type": "opus-1m"}),
+                AgentType::Unset,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "haiku stays cheaper",
+                json!({"subagent_type": "haiku"}),
+                AgentType::Unset,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "not Claude's, or a definition with its own model",
+                json!({"subagent_type": "sol"}),
+                AgentType::Own,
+                Rules::ALL,
+                None,
+            ),
+            (
+                "switched off",
+                json!({"subagent_type": "general-purpose"}),
+                AgentType::Unset,
+                off,
+                None,
+            ),
+        ];
+        for (what, input, kind, rules, want) in cases {
+            assert_eq!(agent_model(rules, &input, kind), want, "{what}");
+        }
+    }
+
+    #[test]
+    fn definitions_that_name_a_model() {
+        let cases: &[(&str, bool)] = &[
+            ("---\nname: a\nmodel: opus\n---\nbody", true),
+            ("---\nname: a\nmodel: \"sonnet\"\n---\n", true),
+            ("---\nname: a\nmodel: inherit\n---\n", false),
+            ("---\nname: a\nmodel:\n---\n", false),
+            ("---\nname: a\n---\nmodel: opus in the body\n", false),
+            ("no frontmatter\nmodel: opus\n", false),
+            ("", false),
+        ];
+        for (def, want) in cases {
+            assert_eq!(names_model(def), *want, "{def:?}");
+        }
+    }
+
+    #[test]
+    fn calls_by_name() {
+        let call = |id: &str, tool: &str, name: &str| {
+            format!(
+                r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"{tool}","input":{{"name":"{name}","prompt":"go"}}}}]}}}}"#
+            )
+        };
+        let t = [
+            call("t1", "Agent", "lane-a"),
+            call("t2", "Agent", "lane-b"),
+            call("t3", "Bash", "lane-c"),
+            call("t4", "Task", "lane-a"),
+        ]
+        .join("\n");
+        let cases: &[(&str, Option<&str>)] = &[
+            ("lane-a", Some("t4")),
+            ("lane-b", Some("t2")),
+            ("lane-c", None),
+            ("lane", None),
+        ];
+        for (name, want) in cases {
+            assert_eq!(call_named(&t, name).as_deref(), *want, "{name}");
+        }
     }
 }

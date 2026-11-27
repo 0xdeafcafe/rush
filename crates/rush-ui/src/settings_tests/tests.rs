@@ -2051,9 +2051,12 @@ fn usage_gathers_the_rules() {
         ("  after", "3 in a row"),
         ("Trim command output", "on"),
         ("  longer than", "600 lines"),
+        ("  or more than", "32 KB"),
         ("Shrink images agents read", "on"),
         ("  images cost at most", "1,568 tokens"),
         ("  contact sheet after", "8 images"),
+        ("Stop messaging full subagents", "over 150k tokens"),
+        ("Subagents that name no model", "Sonnet"),
         ("Hand over near the end of context", "off"),
         ("Cheaper model for routine subagents", "off"),
         ("Pace guard", "off"),
@@ -2123,4 +2126,5 @@ fn usage_gathers_the_rules() {
     set_settings_page(&mut m, PAGE_USAGE);
     assert_eq!(at(&m, "  after").1.shown(), "5 in a row");
     assert!(rows(&m).iter().all(|(l, _)| l != "  longer than"));
+    assert!(rows(&m).iter().all(|(l, _)| l != "  or more than"));
 }

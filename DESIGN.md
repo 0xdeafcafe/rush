@@ -4794,20 +4794,23 @@ shell (`shellbox::set_fake`), which also keeps nothing on disk.
 
 A bundled plugin, `context-guard` (rush-bundled `contextguard/`), on by
 default, that steps into an agent's tool calls through its hooks to keep
-what goes into its context lean. Five rules, each its own setting, all on
+what goes into its context lean. Seven rules, each its own setting, all on
 by default, each with a number you can set (Settings › Usage › Context
 guard; Settings › Plugins › context-guard turns the plugin on or off and
 says where its rules are, not showing them twice). Each step-in is
 logged in the session's events (`hook-denied` with `rule`, `why`,
 `tool`, `path` or `command`; `hook-squeezed` with `before`, `after`,
 `cut`; `hook-shrunk` with `path`, `copy`, `from`, `to`, `before`,
-`after`, `tokens_before`, `tokens_after`; `hook-nudged` with `why`), so
+`after`, `tokens_before`, `tokens_after`; `hook-nudged` with `why`;
+`hook-model` with `subagent_type`, `model`, `why`), so
 `rush why <session>` and `rush events -k hook-denied` show what rush did
 and why.
 
 ```
   agent ── Read ──▶ PreToolUse ─┐                     ┌─ deny + why
-  agent ── Bash ──▶ PreToolUse ─┼─▶ rush gate hook ───┤
+  agent ── Bash ──▶ PreToolUse ─┤                     ├─ input changed
+  Agent, SendMessage,           │                     │
+  agent_send ─────▶ PreToolUse ─┼─▶ rush gate hook ───┤
   (ran) ──────────▶ PostToolUse ┤   context guard     ├─ output squeezed
   (failed) ───────▶ ...Failure ─┤   first, then the   └─ nothing
   compact/clear ──▶ PreCompact, ┘   search guard, gate
@@ -4817,12 +4820,13 @@ and why.
 How. `StartOptions.tool_hook` (rush-core) is a command for rush's
 context guard; the host sets it to `rush gate hook`, the gate's own
 command. A harness with hooks installs it: Claude Code's
-`conn::context_hooks` adds PreToolUse `Read`, PostToolUse
+`conn::context_hooks` adds PreToolUse `Read|SendMessage|mcp__rush__agent_send`, PostToolUse
 `Read|Bash|Edit|Write|MultiEdit|NotebookEdit`, PostToolUseFailure `Bash`,
 PreCompact `*` and SessionStart `compact|clear`, beside the inbox's
-hooks; before a Bash call the gate's own PreToolUse hook asks it.
+hooks; before a Bash or Agent call the gate's own PreToolUse hook asks it.
 `gate_hook` hands every input to `Host::context_step` first; the guard's
-answer wins, and hooks after a call are never the gate's to rewrite.
+answer wins (but for the runaway guard's refusal of a new agent, which
+comes before it), and hooks after a call are never the gate's to rewrite.
 After a Bash call the guard is given the command the agent asked for
 (`hook::original`: the gate's wrap undone, a script run read back from
 its script), not what ran in its place. The rules are pure functions
@@ -4835,7 +4839,8 @@ change works at once, in running sessions too.
 The settings are the plugin's own (`rush_plugin` settings.json, by its
 manifest's keys), so the hook needs nothing else; `contextguard::rules_of`
 turns them into `Rules`, which carries each rule's number to the pure
-functions (`rules::read`, `rules::bash`, `squeeze::cap`). Unset, or a
+functions (`rules::read`, `rules::bash`, `squeeze::cap`, `rules::lane`,
+`rules::agent_model`). Unset, or a
 value its choices don't allow, is today's number:
 
 | row | key | choices | default |
@@ -4848,9 +4853,12 @@ value its choices don't allow, is today's number:
 | ‧ after | `repeat-after` | 2, 3, 5 in a row | 3 |
 | Trim command output | `squeeze` | on, off | on |
 | ‧ longer than | `squeeze-lines` | 300, 600, 1,200 lines (a third kept at each end) | 600: first and last 200 |
+| ‧ or more than | `squeeze-kb` | 16, 32, 64 KB (a third kept at each end) | 32 KB |
 | Shrink images agents read | `images` | on, off | on |
 | ‧ images cost at most | `image-tokens` | 800, 1,568, 3,000 tokens | 1,568 |
 | ‧ contact sheet after | `sheet-after` | 4, 8, 16 images | 8 |
+| Stop messaging full subagents | `lane-cap` | over 100k, 150k, 250k tokens, off | 150k |
+| Subagents that name no model | `agent-model` | sonnet, off | sonnet |
 
 The numbers that stay constants: a read with no limit covers 2,000 lines
 (Claude Code's Read), a failure's last 12 lines say whether two were the
@@ -4933,17 +4941,33 @@ as once:
 - a line repeated in a row written once with ` (×N)`, where that's
   shorter;
 - past **600 lines**, the first and last **200** kept around `… K lines
-  left out (the whole output: <path>) …`, the whole (squeezed) output in
+  left out (the whole output: <path>) …`; past **32 KB**, a third of
+  that at each end (cut at a line's end where one is near, else inside
+  the line, never inside a character) around `… K lines, N KB, left out
+  (the whole output: <path>) …`. The whole (squeezed) output is in
   `$TMPDIR/rush-output/<tool_use_id>.out.txt` (the session's scratch
   folder), for the agent to read if it needs it.
 
-Never squeezed: output that's a file's own text or a patch, whose exact
-spaces an Edit needs (`cat`, `head`, `tail`, `sed`, `awk`, `nl`, `diff`,
-`jq`, `grep`/`rg`/`ag`, `cut`, `tr`, `printf`…, `git
+Output that's a file's own text or a patch, whose exact spaces an Edit
+needs (`cat`, `head`, `tail`, `sed`, `awk`, `nl`, `diff`, `jq`,
+`grep`/`rg`/`ag`, `cut`, `tr`, `printf`…, `git
 diff/show/blame/cat-file/grep`, `git log -p`, `git stash show`, anywhere
-in the command), an image, output Claude Code already kept in a file
-(`persistedOutputPath`), a background task's, and never a Read: Read
-results are never touched. A squeeze is logged when it saved 1 KB or cut.
+in the command), keeps its bytes: none of the above but the cut, whose
+head and tail are the output's own. Never touched: an image, output
+Claude Code already kept in a file (`persistedOutputPath`), a background
+task's, and a Read: Read results are never touched. A squeeze is logged
+when it saved 1 KB or cut.
+
+Why the cut counts bytes and covers file text (`rush efficiency`, 20–27
+Nov 2026 on the machine rush is worked on: 118,289 Bash results, 346 MB,
+92% of it in subagents): 342 MB came from commands with one of the
+programs above in them, which were then neither squeezed nor cut. Claude
+Code keeps every result to 30,000 characters itself, and 9,274 of the
+11,246 results over 16 KB were under 600 lines, so the line cut never
+reached them. A cut at 32 KB saves almost nothing under Claude Code's
+own limit (one result); at 16 KB it cuts 2,201 results, 10 MB; at 8 KB
+10,475, 52 MB. The bulk is many results of a few KB each (agents reading
+files with `sed -n` and `rg`), which only fewer such calls would save.
 
 Measured (`squeeze::tests::measured_on_fixtures`, testdata/; tokens as
 bytes / 4):
@@ -5045,6 +5069,39 @@ already packs well, so their bytes fall less than a real screenshot's
 would; the tokens are exact either way, as they follow from the sizes.
 On a standard-tier model (which cuts every image to 1,568 tokens
 itself) the copy saves bytes, not tokens.
+
+**6. No messaging full subagents** (`lane-cap`). Before SendMessage
+(Claude Code's own subagents) or `mcp__rush__agent_send` (one rush
+started), the guard looks up how many tokens the target's newest request
+sent, and past **150k** (as set) refuses: `context-guard: <agent> is at
+<N>k context; every resume re-sends all of it. Start a fresh agent with
+a short brief instead.` A Claude Code subagent is found by `to`, its
+agent id (`<transcript>/subagents/agent-<id>.jsonl`), or the name its
+Agent call gave it (`rules::call_named` in the main transcript, then the
+run whose `.meta.json` names that call); its tokens are the input, cache
+writes and cache reads of the last assistant line in the last 4 MB of its
+transcript (`rules::context_tokens`). A rush agent's are its host's
+`contextTokens` (`<rush home>/sessions/<id>/info.json`), named by its
+`name`. One that can't be found is let through. Logged as `hook-denied`
+with `to` and `tokens`.
+
+**7. Subagents that name no model** (`agent-model`). An Agent (or Task)
+call with no `model`, of a type that would run on the session's model, is
+given `model: "sonnet"`: PreToolUse answers `permissionDecision: allow`
+with `updatedInput` (the call's input with the model added) and
+`additionalContext` `context-guard: this <type> subagent runs on sonnet,
+as the call named no model. Name one (model: "opus") when the work needs
+it.` Logged as `hook-model`. Which types (`hook::agent_type`): Claude
+Code's general-purpose, Plan and claude, no type at all, and a definition
+in `<cwd>/.claude/agents/<type>.md`, `<claude dir>/agents/<type>.md` or a
+plugin's `<claude dir>/plugins/cache/*/<plugin>/*/agents/<name>.md` with
+no `model:` of its own (or `inherit`); a plugin's type whose definition
+isn't found counts too. Left alone: opus, opus-1m, fable, sonnet, haiku
+and Explore, a definition that names its model, and any other type
+(rush's other makers' models, answered by rush), and every call while
+your settings have a deny or ask rule about `Agent` or `Task` (an allow
+would pass it by). The runaway guard's refusal of a new agent comes
+first (`gate_hook`).
 
 ### A task list left behind (Rust-only)
 

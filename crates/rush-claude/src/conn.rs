@@ -60,14 +60,15 @@ pub fn subagent_model_env(model: &str) -> Option<String> {
 }
 
 /// Puts rush's context guard (command) into Claude Code's hooks: before
-/// each Read (Bash's is the gate's, which asks it); after each Read, edit
+/// each Read and each message to a subagent (SendMessage, rush's
+/// agent_send; Bash's and Agent's are the gate's, which asks it); after each Read, edit
 /// and Bash call, failed Bash calls too; before a compaction, and as a
 /// compacted or cleared session starts again. Added beside hooks already
 /// there for the same events (Rust-only).
 pub fn context_hooks(hooks: &mut Map<String, Value>, command: &str) {
     let h = |matcher: &str| json!({"matcher": matcher, "hooks": [{"type": "command", "command": command, "timeout": 10}]});
     for (event, matcher) in [
-        ("PreToolUse", "Read"),
+        ("PreToolUse", "Read|SendMessage|mcp__rush__agent_send"),
         ("PostToolUse", "Read|Bash|Edit|Write|MultiEdit|NotebookEdit"),
         ("PostToolUseFailure", "Bash"),
         ("PreCompact", "*"),
