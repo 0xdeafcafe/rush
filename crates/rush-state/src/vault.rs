@@ -99,10 +99,11 @@ fn service_of(dir: &Path) -> String {
 }
 
 /// Where rush keeps the sign-ins of the logins not in use: this rush
-/// home's own (see [`service_for`]).
+/// home's own keychain service on macOS (see [`service_for`]), files in
+/// its logins folder elsewhere, where there's no security(1) to ask.
 pub fn vault() -> Keys {
     let dir = crate::dir();
-    let service = Some(service_of(&dir));
+    let service = cfg!(target_os = "macos").then(|| service_of(&dir));
     Keys {
         dir: dir.join("logins"),
         service,
@@ -589,9 +590,12 @@ mod tests {
             b"the user's own",
             "the normal home's sign-in was changed"
         );
-        {
+        if cfg!(target_os = "macos") {
             assert!(a.service().unwrap().starts_with("rush-login-"));
             assert_ne!(a.service(), b.service());
+        } else {
+            assert_eq!(a.service(), None, "a keychain off macOS");
+            assert_eq!(a.dir, t.path().join("a").join("logins"));
         }
     }
 }
