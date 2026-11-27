@@ -640,14 +640,24 @@ function sessionScreen(id, init) {
   };
 
   const down = () => { if (stick) scrollTo(0, document.body.scrollHeight); };
+  // Only a scroll up lets go of the bottom. Our own scrollTo moves down, and
+  // its event can land after more of the log is drawn, when the page is no
+  // longer at the bottom: read as a scroll, that left a load at the top.
+  let lastY = scrollY;
   const onScroll = () => {
-    stick = innerHeight + scrollY >= document.body.scrollHeight - 120;
+    const bottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
+    if (scrollY < lastY || bottom) stick = bottom;
+    lastY = scrollY;
     const j = $('#jump');
     if (j) j.classList.toggle('hidden', stick || tab !== 'c');
     if (scrollY < 80) earlier();
   };
   addEventListener('scroll', onScroll, {passive: true});
   sc.on(() => removeEventListener('scroll', onScroll));
+  // the log grows without an event too (an image loads, a card opens)
+  const grown = new ResizeObserver(() => { if (tab === 'c') down(); });
+  grown.observe(log);
+  sc.on(() => grown.disconnect());
   const jb = $('#jump');
   if (jb) jb.onclick = () => { stick = true; down(); };
 
