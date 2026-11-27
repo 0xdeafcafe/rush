@@ -799,6 +799,31 @@ fn hook_as(ctx: &Ctx, codex: bool, r: &mut dyn Read, w: &mut dyn Write) {
     } else {
         Vec::new()
     };
+    // A new subagent or workflow is the runaway guard's first: the context
+    // guard's word on its model never lets one through it refuses.
+    if pre
+        && matches!(inp.tool_name.as_str(), "Agent" | "Task" | "Workflow")
+        && let Some(why) = spawns_refused(&ctx.plugin.home, rush_core::time::now(), &ctx.session)
+    {
+        let reason = format!(
+            "The user's runaway guard is pausing new agents: {why}. Finish your current work without starting any new agents; they're allowed again once that changes."
+        );
+        let f = fields(
+            json!({"why": clip_text(&why), "tool": inp.tool_name, "tool_use_id": inp.tool_use_id}),
+        );
+        if ctx.session.is_empty() {
+            ctx.host.log("guard-refused", f);
+        } else {
+            ctx.host.log_event(&ctx.session, "guard-refused", f);
+        }
+        let out = json!({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}});
+        if let Ok(mut b) = rush_state::json::to_vec(&out) {
+            b.push(b'\n');
+            let _ = w.write_all(&b);
+        }
+        return;
+    }
     let given = if asked.is_empty() { &b } else { &asked };
     if let Some(step) = ctx.host.context_step(given) {
         if !step.kind.is_empty() {
@@ -816,33 +841,7 @@ fn hook_as(ctx: &Ctx, codex: bool, r: &mut dyn Read, w: &mut dyn Write) {
         }
         return;
     }
-    if !pre {
-        return;
-    }
-    if matches!(inp.tool_name.as_str(), "Agent" | "Task" | "Workflow") {
-        // A new subagent or workflow, while the runaway guard refuses them.
-        if let Some(why) = spawns_refused(&ctx.plugin.home, rush_core::time::now(), &ctx.session) {
-            let reason = format!(
-                "The user's runaway guard is pausing new agents: {why}. Finish your current work without starting any new agents; they're allowed again once that changes."
-            );
-            let f = fields(
-                json!({"why": clip_text(&why), "tool": inp.tool_name, "tool_use_id": inp.tool_use_id}),
-            );
-            if ctx.session.is_empty() {
-                ctx.host.log("guard-refused", f);
-            } else {
-                ctx.host.log_event(&ctx.session, "guard-refused", f);
-            }
-            let out = json!({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}});
-            if let Ok(mut b) = rush_state::json::to_vec(&out) {
-                b.push(b'\n');
-                let _ = w.write_all(&b);
-            }
-        }
-        return;
-    }
-    if inp.tool_name != "Bash" {
+    if !pre || inp.tool_name != "Bash" {
         return;
     }
     let Some(input) = inp.tool_input.as_mut() else {

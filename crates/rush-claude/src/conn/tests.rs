@@ -336,7 +336,10 @@ fn context_hooks_go_beside_the_others() {
             .collect()
     };
     let cases: &[(&str, &[&str])] = &[
-        ("PreToolUse", &["Read rush gate hook"]),
+        (
+            "PreToolUse",
+            &["Read|SendMessage|mcp__rush__agent_send rush gate hook"],
+        ),
         (
             "PostToolUse",
             &[

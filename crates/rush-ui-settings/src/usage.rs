@@ -251,6 +251,31 @@ fn guard_number(
     st
 }
 
+/// One of the context guard's settings from named choices: each value
+/// stored, and how it's shown.
+fn guard_named(
+    g: &GuardRead,
+    key: &'static str,
+    label: &str,
+    what: &str,
+    choices: &[(&str, &str)],
+) -> Setting {
+    let value = g.values.get(key).cloned().unwrap_or_default();
+    let mut st = Setting {
+        label: label.into(),
+        value,
+        what: what.into(),
+        ..Setting::default()
+    };
+    for (c, shown) in choices {
+        st.choices.push(c.to_string());
+        st.names.insert(c.to_string(), shown.to_string());
+        st.means.insert(c.to_string(), String::new());
+    }
+    st.run = Some(Rc::new(move |m: &mut Model, v: &str| set_guard(m, key, v)));
+    st
+}
+
 /// A count as words: 1,000.
 fn thousands(n: u64) -> String {
     if n >= 1000 {
@@ -325,7 +350,7 @@ pub fn context_guard_section(m: &Model) -> Section {
         &g,
         cg::SQUEEZE,
         "Trim command output",
-        "Takes terminal colours and codes, progress bars' redraws, spaces at line ends, runs of blank lines and repeated lines out of a shell command's output before the agent sees it, and cuts a long one to its first and last lines, the whole kept in a file it's pointed to. Never the output of cat, sed, git diff, rg and the like, whose exact spaces an edit needs. Each is in the session's events as hook-squeezed.",
+        "Takes terminal colours and codes, progress bars' redraws, spaces at line ends, runs of blank lines and repeated lines out of a shell command's output before the agent sees it, and cuts a long one to its first and last lines, the whole kept in a file it's pointed to. The output of cat, sed, git diff, rg and the like, whose exact spaces an edit needs, keeps its bytes and is only cut. Each is in the session's events as hook-squeezed.",
         "command output is trimmed before the agent reads it.",
         "the agent reads command output as it came.",
     ));
@@ -337,6 +362,14 @@ pub fn context_guard_section(m: &Model) -> Section {
             "Output longer than this many lines keeps its first and last third (200 each of 600); the rest is left out, kept whole in a file the agent is pointed to.",
             cg::SQUEEZE_LINES_CHOICES,
             &|n| format!("{} lines", thousands(n)),
+        ));
+        rows.push(guard_number(
+            &g,
+            cg::SQUEEZE_KB,
+            "  or more than",
+            "Output over this many KB keeps a third of them at each end, the whole kept in a file. Long lines (a compiler's, a minified file) pass a count of lines; this counts the output of cat, sed and the like too, whose bytes are otherwise left as they came.",
+            cg::SQUEEZE_KB_CHOICES,
+            &|kb| format!("{kb} KB"),
         ));
     }
     rows.push(guard_switch(
@@ -365,6 +398,27 @@ pub fn context_guard_section(m: &Model) -> Section {
             &|n| format!("{n} images"),
         ));
     }
+    rows.push(guard_number(
+        &g,
+        cg::LANE_CAP,
+        "Stop messaging full subagents",
+        "Refuses a message (SendMessage, agent_send) to a subagent whose context holds more than this many tokens: every message re-sends all of it. The agent is told to start a fresh one with a short brief. Each refusal is in the session's events as hook-denied.",
+        cg::LANE_CAP_CHOICES,
+        &|k| {
+            if k == 0 {
+                "off".into()
+            } else {
+                format!("over {k}k tokens")
+            }
+        },
+    ));
+    rows.push(guard_named(
+        &g,
+        cg::AGENT_MODEL,
+        "Subagents that name no model",
+        "An Agent call that names no model, of a type that would run on the session's model, runs on Sonnet, and the agent is told so; opus, fable, haiku, a definition with a model of its own and other makers' models are left as they are. Each is in the session's events as hook-model.",
+        &[("sonnet", "Sonnet"), ("off", "the session's model")],
+    ));
     let note = if g.on {
         "on unless you turn it off; Claude Code for now"
     } else {

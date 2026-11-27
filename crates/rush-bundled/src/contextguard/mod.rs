@@ -4,7 +4,9 @@
 //! a word first, no running a command a fourth time that failed the same
 //! way three times, and a shell command's output squeezed of terminal
 //! codes, progress redraws and repeats; and an image read as a smaller
-//! WebP copy, a contact sheet suggested once an agent has looked at many.
+//! WebP copy, a contact sheet suggested once an agent has looked at many;
+//! no message to a subagent whose context is past a cap, and an Agent call
+//! that names no model given Sonnet.
 //! Each is a setting of its own, on by default. rush gate hook asks it, as
 //! it asks search-guard; what it refuses, squeezes or shrinks is logged,
 //! for rush why and rush events. Rust-only: Go rush has no context guard.
@@ -35,6 +37,13 @@ pub const REREAD_KB: &str = "reread-kb";
 pub const BIG_LINES: &str = "big-read-lines";
 pub const REPEATS: &str = "repeat-after";
 pub const SQUEEZE_LINES: &str = "squeeze-lines";
+/// And how many KB of output are cut (a third of them kept at each end).
+pub const SQUEEZE_KB: &str = "squeeze-kb";
+/// A message to a subagent past this many thousand tokens of context is
+/// refused ("off": never).
+pub const LANE_CAP: &str = "lane-cap";
+/// The model an Agent call that names none is given ("off": none).
+pub const AGENT_MODEL: &str = "agent-model";
 /// Images read as a smaller WebP copy, and a contact sheet suggested; the
 /// most tokens a copy costs; images looked at before the suggestion.
 pub const IMAGES: &str = "images";
@@ -47,6 +56,9 @@ pub const REREAD_KB_CHOICES: &[&str] = &["1", "2", "4", "8"];
 pub const BIG_LINES_CHOICES: &[&str] = &["500", "1000", "2000"];
 pub const REPEATS_CHOICES: &[&str] = &["2", "3", "5"];
 pub const SQUEEZE_LINES_CHOICES: &[&str] = &["300", "600", "1200"];
+pub const SQUEEZE_KB_CHOICES: &[&str] = &["16", "32", "64"];
+pub const LANE_CAP_CHOICES: &[&str] = &["100", "150", "250", "off"];
+pub const AGENT_MODEL_CHOICES: &[&str] = &["sonnet", "off"];
 pub const IMAGE_TOKENS_CHOICES: &[&str] = &["800", "1568", "3000"];
 pub const SHEET_AFTER_CHOICES: &[&str] = &["4", "8", "16"];
 
@@ -95,9 +107,9 @@ pub fn manifest() -> Manifest {
                 SQUEEZE,
                 "Squeeze command output",
                 "Takes terminal colours and codes, progress bars' redraws, spaces at line ends, runs of blank lines \
-                 and repeated lines out of a shell command's output before the agent sees it, and cuts one over 600 lines (as set) \
-                 to its first and last third (the whole kept in a file it's pointed to). Never the output of \
-                 cat, sed, git diff, rg and the like, whose exact spaces an edit needs",
+                 and repeated lines out of a shell command's output before the agent sees it, and cuts one over 600 lines \
+                 or 32 KB (as set) to its first and last third (the whole kept in a file it's pointed to). The output of \
+                 cat, sed, git diff, rg and the like, whose exact spaces an edit needs, is only cut",
             ),
             pick(
                 REREAD_KB,
@@ -128,6 +140,32 @@ pub fn manifest() -> Manifest {
                 "600",
                 "Output longer than this many lines keeps a third of them at each end",
             ),
+            pick(
+                SQUEEZE_KB,
+                "Or more than",
+                SQUEEZE_KB_CHOICES,
+                "32",
+                "Output over this many KB keeps a third of them at each end, the whole kept in a file; the output \
+                 of cat, sed and the like too, its bytes otherwise as they came",
+            ),
+            pick(
+                LANE_CAP,
+                "Stop messaging full subagents",
+                LANE_CAP_CHOICES,
+                "150",
+                "Refuses a message (SendMessage, agent_send) to a subagent whose context holds more than this many \
+                 thousand tokens, as every message re-sends all of it, and tells the agent to start a fresh one with \
+                 a short brief",
+            ),
+            pick(
+                AGENT_MODEL,
+                "Subagents that name no model",
+                AGENT_MODEL_CHOICES,
+                "sonnet",
+                "Gives an Agent call that names no model Sonnet, when its type would run on the session's model \
+                 (not opus, fable, haiku, a definition with a model of its own, or another maker's model), and says \
+                 so to the agent",
+            ),
             on(
                 IMAGES,
                 "Shrink images agents read",
@@ -155,7 +193,8 @@ pub fn manifest() -> Manifest {
             "",
             "Keeps agents' context lean from their tool calls: no re-reading files that haven't changed, no \
              reading huge files whole, no running a command again that failed the same way 3 times, command \
-             output without colour codes, progress bars and repeats, and images read as smaller copies.",
+             output without colour codes, progress bars and repeats, images read as smaller copies, no \
+             messages to subagents with full contexts, and Sonnet for subagents that name no model.",
             16,
         )
     }
@@ -196,6 +235,12 @@ pub fn rules_of(values: &std::collections::BTreeMap<String, String>) -> Rules {
         repeats: n(REPEATS).map_or(all.repeats, |r| r as u32),
         cap_lines,
         keep_lines: cap_lines / 3,
+        cap_bytes: n(SQUEEZE_KB).map_or(all.cap_bytes, |kb| kb as usize * 1024),
+        lane_cap: match values.get(LANE_CAP).map(String::as_str) {
+            Some("off") => 0,
+            _ => n(LANE_CAP).map_or(all.lane_cap, |k| k * 1000),
+        },
+        agent_model: values.get(AGENT_MODEL).is_none_or(|v| v != "off"),
         images: on(IMAGES),
         image_tokens: n(IMAGE_TOKENS)
             .filter(|n| *n >= 64)
@@ -343,7 +388,37 @@ mod tests {
                     ..Rules::ALL
                 },
             ),
+            (
+                v(SQUEEZE_KB, "16"),
+                Rules {
+                    cap_bytes: 16 * 1024,
+                    ..Rules::ALL
+                },
+            ),
+            (
+                v(LANE_CAP, "250"),
+                Rules {
+                    lane_cap: 250_000,
+                    ..Rules::ALL
+                },
+            ),
+            (
+                v(LANE_CAP, "off"),
+                Rules {
+                    lane_cap: 0,
+                    ..Rules::ALL
+                },
+            ),
+            (
+                v(AGENT_MODEL, "off"),
+                Rules {
+                    agent_model: false,
+                    ..Rules::ALL
+                },
+            ),
+            (v(AGENT_MODEL, "sonnet"), Rules::ALL),
             // Nonsense reads as the default.
+            (v(LANE_CAP, "lots"), Rules::ALL),
             (v(IMAGE_TOKENS, "10"), Rules::ALL),
             (v(REPEATS, "0"), Rules::ALL),
             (v(SQUEEZE_LINES, "lots"), Rules::ALL),

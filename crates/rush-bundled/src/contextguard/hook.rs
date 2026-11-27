@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::images;
-use super::rules::{self, FileStat, ImageStep, Outcome, Refusal, Rules, State};
+use super::rules::{self, AgentType, FileStat, ImageStep, Outcome, Refusal, Rules, State};
 use super::squeeze;
 
 /// Files up to this size are read for their lines and a hash.
@@ -28,6 +28,13 @@ const SNIFF: usize = 8 * 1024;
 const LOG_SAVED: usize = 1024;
 /// A session's file that hasn't changed in this long is let go.
 const KEPT: Duration = Duration::from_secs(7 * 24 * 3600);
+/// How much of a subagent's transcript, from its end, is read for its
+/// newest request: one line can hold a big tool result.
+const TRANSCRIPT_TAIL: u64 = 4 << 20;
+/// How much of the main transcript is searched for a run's name.
+const NAMED_IN: u64 = 64 << 20;
+/// rush's tool that messages one of the agents it started.
+pub const AGENT_SEND: &str = "mcp__rush__agent_send";
 
 /// What the hook needs of the world.
 pub struct Env {
@@ -69,6 +76,7 @@ struct Input {
     source: String,
     cwd: String,
     permission_mode: String,
+    transcript_path: String,
 }
 
 fn num(v: &Value, key: &str) -> Option<u64> {
@@ -180,6 +188,25 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
             })?;
             Some(deny(r, &inp, json!({"command": clip(&command)})))
         }
+        ("PreToolUse" | "", "SendMessage") => {
+            if env.rules.lane_cap == 0 {
+                return None;
+            }
+            let to = text(&inp.tool_input, "to");
+            let tokens = subagent_context(&inp.transcript_path, to)?;
+            let r = rules::lane(env.rules, to, tokens)?;
+            Some(deny(r, &inp, json!({"to": to, "tokens": tokens})))
+        }
+        ("PreToolUse" | "", AGENT_SEND) => {
+            if env.rules.lane_cap == 0 {
+                return None;
+            }
+            let id = text(&inp.tool_input, "id");
+            let (name, tokens) = session_context(&env.dir, id)?;
+            let r = rules::lane(env.rules, if name.is_empty() { id } else { &name }, tokens)?;
+            Some(deny(r, &inp, json!({"to": id, "tokens": tokens})))
+        }
+        ("PreToolUse" | "", "Agent" | "Task") => agent_pre(&inp, env),
         ("PostToolUse", "Read") => {
             let p = path();
             if images::is_image(Path::new(&p)) {
@@ -236,7 +263,7 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
                     }
                 });
             }
-            if !env.rules.squeeze || !squeeze::squeezes(&command) {
+            if !env.rules.squeeze {
                 return None;
             }
             squeezed(&inp, &command, &env.tmp, env.rules)
@@ -397,6 +424,12 @@ fn may_rewrite(inp: &Input, env: &Env, p: &str) -> bool {
 /// Whether your Claude Code settings (yours, the project's, the project's
 /// own local) have a deny or ask rule about Read.
 fn read_rules(claude_dir: Option<&Path>, cwd: &str) -> bool {
+    rules_about(claude_dir, cwd, &["Read"])
+}
+
+/// Whether your Claude Code settings have a deny or ask rule about any of
+/// tools.
+fn rules_about(claude_dir: Option<&Path>, cwd: &str, tools: &[&str]) -> bool {
     let mut files = Vec::new();
     if let Some(d) = claude_dir {
         files.push(d.join("settings.json"));
@@ -415,12 +448,173 @@ fn read_rules(claude_dir: Option<&Path>, cwd: &str) -> bool {
         };
         ["deny", "ask"].iter().any(|k| {
             v["permissions"][k].as_array().is_some_and(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .any(|r| r == "Read" || r.starts_with("Read("))
+                a.iter().filter_map(Value::as_str).any(|r| {
+                    tools
+                        .iter()
+                        .any(|t| r == *t || r.strip_prefix(t).is_some_and(|x| x.starts_with('(')))
+                })
             })
         })
     })
+}
+
+/// Before an Agent call that names no model, of a type that would run on
+/// the session's: the call given AGENT_MODEL (Claude Code's updatedInput),
+/// and the agent told so.
+fn agent_pre(inp: &Input, env: &Env) -> Option<Answer> {
+    if !env.rules.agent_model {
+        return None;
+    }
+    let t = text(&inp.tool_input, "subagent_type");
+    let kind = agent_type(env.claude_dir.as_deref(), &inp.cwd, t);
+    let model = rules::agent_model(env.rules, &inp.tool_input, kind)?;
+    // "allow" with the input changed, as an image read's copy: not while
+    // your own rules would have it asked about or refused.
+    if rules_about(env.claude_dir.as_deref(), &inp.cwd, &["Agent", "Task"]) {
+        return None;
+    }
+    let mut input = inp.tool_input.as_object().cloned().unwrap_or_default();
+    input.insert("model".into(), Value::String(model.into()));
+    let shown = if t.is_empty() { "general-purpose" } else { t };
+    let why = format!(
+        "context-guard: this {shown} subagent runs on {model}, as the call named no model. Name one (model: \"opus\") \
+         when the work needs it."
+    );
+    let mut fields = Map::new();
+    fields.insert("why".into(), Value::String(why.clone()));
+    fields.insert("rule".into(), "agent-model".into());
+    fields.insert("tool".into(), Value::String(inp.tool_name.clone()));
+    fields.insert("tool_use_id".into(), Value::String(inp.tool_use_id.clone()));
+    if !inp.agent_id.is_empty() {
+        fields.insert("agent".into(), Value::String(inp.agent_id.clone()));
+    }
+    fields.insert("subagent_type".into(), Value::String(shown.into()));
+    fields.insert("model".into(), Value::String(model.into()));
+    Some(Answer {
+        out: json!({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "context-guard: a subagent that names no model runs on the cheaper one",
+            "updatedInput": Value::Object(input),
+            "additionalContext": why,
+        }}),
+        kind: "hook-model",
+        fields,
+    })
+}
+
+/// What a subagent type is to the model rule: Claude Code's own that run
+/// on the session's model, and a definition of yours, or a plugin's, that
+/// names none, are Unset; a definition naming its model, and any type with
+/// no definition to be found (rush's other models, answered by rush), Own.
+fn agent_type(claude_dir: Option<&Path>, cwd: &str, t: &str) -> AgentType {
+    if rules::UNSET_TYPES.contains(&t) {
+        return AgentType::Unset;
+    }
+    if rules::MODEL_TYPES.contains(&t) || t.contains(['/', '\\']) || t.starts_with('.') {
+        return AgentType::Own;
+    }
+    let mut defs = Vec::new();
+    let plugin = t.split_once(':');
+    match plugin {
+        Some((plugin, name)) => {
+            // <claude dir>/plugins/cache/<market>/<plugin>/<version>/agents/<name>.md
+            if let Some(d) = claude_dir
+                && let Ok(markets) = fs::read_dir(d.join("plugins").join("cache"))
+            {
+                for m in markets.flatten() {
+                    let Ok(versions) = fs::read_dir(m.path().join(plugin)) else {
+                        continue;
+                    };
+                    for v in versions.flatten() {
+                        defs.push(v.path().join("agents").join(format!("{name}.md")));
+                    }
+                }
+            }
+        }
+        None => {
+            if !cwd.is_empty() {
+                defs.push(
+                    Path::new(cwd)
+                        .join(".claude")
+                        .join("agents")
+                        .join(format!("{t}.md")),
+                );
+            }
+            if let Some(d) = claude_dir {
+                defs.push(d.join("agents").join(format!("{t}.md")));
+            }
+        }
+    }
+    for d in defs {
+        if let Ok(b) = fs::read_to_string(&d) {
+            return if rules::names_model(&b) {
+                AgentType::Own
+            } else {
+                AgentType::Unset
+            };
+        }
+    }
+    // A plugin's type whose definition isn't where it's looked for is
+    // still Claude's.
+    if plugin.is_some() {
+        AgentType::Unset
+    } else {
+        AgentType::Own
+    }
+}
+
+/// How many tokens the subagent to (its agent id, or the name its Agent
+/// call gave it) of the session whose transcript is main last sent; None
+/// when that can't be found.
+fn subagent_context(main: &str, to: &str) -> Option<u64> {
+    if main.is_empty() || to.is_empty() || to.contains(['/', '\\']) {
+        return None;
+    }
+    let base = main.strip_suffix(".jsonl").unwrap_or(main);
+    let dir = Path::new(base).join("subagents");
+    let by_id = |id: &str| dir.join(format!("agent-{id}.jsonl"));
+    let mut file = by_id(to);
+    if !file.exists() {
+        // By name: the Agent call that gave it, then the run that call
+        // started (its meta file says the call).
+        let call = rules::call_named(&tail_of(Path::new(main), NAMED_IN)?, to)?;
+        let ent = fs::read_dir(&dir).ok()?.flatten().find(|e| {
+            e.file_name().to_string_lossy().ends_with(".meta.json")
+                && fs::read(e.path())
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                    .is_some_and(|m| m["toolUseId"] == call.as_str())
+        })?;
+        let name = ent.file_name().to_string_lossy().into_owned();
+        file = dir.join(name.strip_suffix(".meta.json")?.to_string() + ".jsonl");
+    }
+    rules::context_tokens(&tail_of(&file, TRANSCRIPT_TAIL)?)
+}
+
+/// The name and context tokens of the rush session id, as its host last
+/// said them (info.json); None when there's none.
+fn session_context(rush_dir: &Path, id: &str) -> Option<(String, u64)> {
+    if file_name(id).is_empty() {
+        return None;
+    }
+    let b = fs::read(rush_dir.join("sessions").join(id).join("info.json")).ok()?;
+    let v: Value = serde_json::from_slice(&b).ok()?;
+    let tokens = v["contextTokens"].as_u64().filter(|n| *n > 0)?;
+    Some((text(&v, "name").to_string(), tokens))
+}
+
+/// The last n bytes of a file, as text.
+fn tail_of(path: &Path, n: u64) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    if len > n {
+        f.seek(SeekFrom::Start(len - n)).ok()?;
+    }
+    let mut b = Vec::new();
+    f.take(n).read_to_end(&mut b).ok()?;
+    Some(String::from_utf8_lossy(&b).into_owned())
 }
 
 fn clip(s: &str) -> String {
@@ -455,7 +649,9 @@ fn deny(r: Refusal, inp: &Input, extra: Value) -> Answer {
 }
 
 /// A shell call's output squeezed, as the hook replaces it; None when
-/// squeezing changes nothing, or it isn't plain output.
+/// squeezing changes nothing, or it isn't plain output. A command whose
+/// output is a file's own text (squeeze::squeezes) keeps its exact bytes:
+/// only its middle is cut when it's long, the whole kept in a file.
 fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answer> {
     let resp = inp.tool_response.as_object()?;
     let flag = |k: &str| resp.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -465,6 +661,7 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answ
     {
         return None;
     }
+    let trims = squeeze::squeezes(command);
     let mut out = resp.clone();
     let (mut before, mut after) = (0, 0);
     let mut cut = false;
@@ -472,8 +669,12 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answ
         let Some(s) = resp.get(key).and_then(Value::as_str) else {
             continue;
         };
-        let mut q = squeeze::squeeze(s);
-        if q.split_inclusive('\n').count() > rules.cap_lines {
+        let mut q = if trims {
+            squeeze::squeeze(s)
+        } else {
+            s.to_string()
+        };
+        if q.len() > rules.cap_bytes || q.split_inclusive('\n').count() > rules.cap_lines {
             let id = if inp.tool_use_id.is_empty() || file_name(&inp.tool_use_id).is_empty() {
                 format!("{:016x}", fnv(q.as_bytes()))
             } else {
@@ -486,6 +687,7 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answ
                     &kept.to_string_lossy(),
                     rules.cap_lines,
                     rules.keep_lines,
+                    rules.cap_bytes,
                 )
             {
                 q = c;
@@ -507,11 +709,17 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answ
         fields.insert("cut".into(), Value::Bool(cut));
         fields.insert("command".into(), Value::String(clip(command)));
         fields.insert("tool_use_id".into(), Value::String(inp.tool_use_id.clone()));
+        let what = match (trims, cut) {
+            (true, true) => {
+                "terminal codes, progress redraws, spaces and repeated lines, and its middle, kept in a file"
+            }
+            (true, false) => "terminal codes, progress redraws, spaces and repeated lines",
+            (false, _) => "its middle, kept in a file",
+        };
         fields.insert(
             "why".into(),
             Value::String(format!(
-                "its output went from {before} to {after} bytes: terminal codes, progress redraws, spaces and repeated lines{}",
-                if cut { ", and its middle, kept in a file" } else { "" }
+                "its output went from {before} to {after} bytes: {what}"
             )),
         );
     }
@@ -859,7 +1067,7 @@ mod tests {
         let img = json!({"tool_response": {"stdout": out, "isImage": true}});
         assert_eq!(bash(&t, "PostToolUse", "make", img), None);
         // A long one is cut, its whole kept for the agent.
-        let long: String = (0..2000).map(|i| format!("test t{i} ... ok\n")).collect();
+        let long: String = (0..2000).map(|i| format!("ok {i}\n")).collect();
         let resp = json!({"tool_response": {"stdout": long, "stderr": ""}});
         let a = bash(&t, "PostToolUse", "cargo test", resp).unwrap();
         assert_eq!(a.kind, "hook-squeezed");
@@ -882,6 +1090,262 @@ mod tests {
         });
         let resp = json!({"tool_response": {"stdout": out, "stderr": ""}});
         assert_eq!(bash(&off, "PostToolUse", "cargo build", resp), None);
+    }
+
+    /// A file's own text keeps its bytes, but a long one has its middle
+    /// cut too, by lines or by bytes.
+    #[test]
+    fn long_file_text_is_cut_not_trimmed() {
+        let t = setup(Rules::ALL);
+        // Command, output; whether it's cut, and whether the head kept
+        // its exact bytes (trailing spaces, colour codes).
+        let wide: String = (0..300)
+            .map(|i| format!("{i:04} {}  \n", "x".repeat(120)))
+            .collect();
+        let tall: String = (0..1000)
+            .map(|i| format!("\x1b[1m{i}\x1b[0m  \n"))
+            .collect();
+        let cases: Vec<(&str, String, bool)> = vec![
+            ("cat a.rs", "a  \n\n\n\nb\n".into(), false),
+            ("sed -n 1,300p big.rs", wide.clone(), true),
+            ("cargo test 2>&1 | tail -1000", tall.clone(), true),
+        ];
+        for (command, out, cut) in cases {
+            let resp = json!({"tool_response": {"stdout": out, "stderr": ""}});
+            let a = bash(&t, "PostToolUse", command, resp);
+            if !cut {
+                assert_eq!(a, None, "{command}");
+                continue;
+            }
+            let a = a.unwrap_or_else(|| panic!("{command}: not cut"));
+            assert_eq!(a.kind, "hook-squeezed", "{command}");
+            assert_eq!(a.fields["cut"], true, "{command}");
+            assert!(
+                a.fields["why"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("bytes: its middle, kept in a file"),
+                "{command}: {:?}",
+                a.fields["why"]
+            );
+            let s = a.out["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                .as_str()
+                .unwrap();
+            let head = s.split("… ").next().unwrap();
+            assert!(
+                out.starts_with(head),
+                "{command}: the head is the output's own"
+            );
+            assert!(s.len() <= Rules::ALL.cap_bytes, "{command}: {}", s.len());
+        }
+        // Set smaller, it cuts sooner.
+        let small = t.with(Rules {
+            cap_bytes: 16 * 1024,
+            ..Rules::ALL
+        });
+        let mid: String = (0..200)
+            .map(|i| format!("{i:04} {}\n", "y".repeat(95)))
+            .collect();
+        let resp = json!({"tool_response": {"stdout": mid, "stderr": ""}});
+        assert_eq!(
+            bash(&t, "PostToolUse", "cat m.txt", resp.clone()),
+            None,
+            "20 KB under 32"
+        );
+        assert!(
+            bash(&small, "PostToolUse", "cat m.txt", resp).is_some(),
+            "20 KB over 16"
+        );
+    }
+
+    /// A transcript line of an assistant request that sent tokens.
+    fn request(tokens: u64) -> String {
+        format!(
+            r#"{{"type":"assistant","message":{{"usage":{{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":{}}}}}}}"#,
+            tokens - 1
+        )
+    }
+
+    #[test]
+    fn lanes_capped_through_the_hook() {
+        let t = setup(Rules::ALL);
+        let main = t.work.join("s1.jsonl");
+        let subs = t.work.join("s1").join("subagents");
+        fs::create_dir_all(&subs).unwrap();
+        let call = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_big","name":"Agent","input":{"name":"lane-big","prompt":"go"}}]}}"#;
+        fs::write(&main, format!("{call}\n")).unwrap();
+        fs::write(
+            subs.join("agent-abig.jsonl"),
+            [request(10), request(180_400)].join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            subs.join("agent-abig.meta.json"),
+            r#"{"toolUseId":"toolu_big"}"#,
+        )
+        .unwrap();
+        fs::write(subs.join("agent-asmall.jsonl"), request(40_000)).unwrap();
+        let send = |t: &T, to: &str| {
+            hook(
+                t,
+                json!({"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "SendMessage",
+                       "transcript_path": main, "tool_use_id": "toolu_s", "tool_input": {"to": to, "message": "more"}}),
+            )
+        };
+        // To, the refusal's words (empty: let through).
+        let cases: &[(&str, &str)] = &[
+            (
+                "abig",
+                "context-guard: abig is at 180k context; every resume re-sends all of it.",
+            ),
+            (
+                "lane-big",
+                "context-guard: lane-big is at 180k context; every resume re-sends all of it.",
+            ),
+            ("asmall", ""),
+            ("nobody", ""),
+        ];
+        for (to, want) in cases {
+            let a = send(&t, to);
+            assert!(reason(&a).starts_with(want), "{to}: {a:?}");
+            if !want.is_empty() {
+                let a = a.unwrap();
+                assert_eq!(
+                    (a.kind, &a.fields["rule"]),
+                    ("hook-denied", &json!("lane-cap"))
+                );
+                assert_eq!(a.fields["tokens"], 180_400);
+            }
+        }
+        let loose = t.with(Rules {
+            lane_cap: 250_000,
+            ..Rules::ALL
+        });
+        assert_eq!(send(&loose, "abig"), None);
+        let off = t.with(Rules {
+            lane_cap: 0,
+            ..Rules::ALL
+        });
+        assert_eq!(send(&off, "abig"), None);
+
+        // rush's own agents, by the context their host last said.
+        let info = |id: &str, v: Value| {
+            let d = t.env.dir.join("sessions").join(id);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("info.json"), v.to_string()).unwrap();
+        };
+        info(
+            "c0ffee01",
+            json!({"name": "render lane", "contextTokens": 210_000}),
+        );
+        info("c0ffee02", json!({"name": "", "contextTokens": 90_000}));
+        let agent_send = |id: &str| {
+            hook(
+                &t,
+                json!({"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": AGENT_SEND,
+                       "tool_use_id": "toolu_a", "tool_input": {"id": id, "prompt": "more"}}),
+            )
+        };
+        assert!(
+            reason(&agent_send("c0ffee01"))
+                .starts_with("context-guard: render lane is at 210k context"),
+            "{:?}",
+            agent_send("c0ffee01")
+        );
+        assert_eq!(agent_send("c0ffee02"), None);
+        assert_eq!(agent_send("nobody"), None);
+        assert_eq!(agent_send("../x"), None);
+    }
+
+    #[test]
+    fn agent_models_through_the_hook() {
+        let t = setup(Rules::ALL);
+        let defs = t.work.join(".claude").join("agents");
+        fs::create_dir_all(&defs).unwrap();
+        fs::write(defs.join("mine.md"), "---\nname: mine\n---\nDo it.").unwrap();
+        fs::write(
+            defs.join("heavy.md"),
+            "---\nname: heavy\nmodel: opus\n---\nDo it.",
+        )
+        .unwrap();
+        let plugin = t
+            .env
+            .claude_dir
+            .as_ref()
+            .unwrap()
+            .join("plugins/cache/mkt/skills/2.0.0/agents");
+        fs::create_dir_all(&plugin).unwrap();
+        fs::write(plugin.join("builder.md"), "---\nname: builder\n---\n").unwrap();
+        fs::write(
+            plugin.join("boss.md"),
+            "---\nname: boss\nmodel: fable\n---\n",
+        )
+        .unwrap();
+        let agent = |t: &T, input: Value| {
+            hook(
+                t,
+                json!({"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Agent",
+                       "cwd": t.work, "tool_use_id": "toolu_g", "tool_input": input}),
+            )
+        };
+        // The call's input; the model it's given (None: left as it is).
+        let cases: Vec<(Value, Option<&str>)> = vec![
+            (
+                json!({"subagent_type": "general-purpose", "prompt": "x"}),
+                Some("sonnet"),
+            ),
+            (json!({"prompt": "x"}), Some("sonnet")),
+            (
+                json!({"subagent_type": "claude", "prompt": "x"}),
+                Some("sonnet"),
+            ),
+            (
+                json!({"subagent_type": "mine", "prompt": "x"}),
+                Some("sonnet"),
+            ),
+            (
+                json!({"subagent_type": "skills:builder", "prompt": "x"}),
+                Some("sonnet"),
+            ),
+            (json!({"subagent_type": "heavy", "prompt": "x"}), None),
+            (json!({"subagent_type": "skills:boss", "prompt": "x"}), None),
+            (
+                json!({"subagent_type": "general-purpose", "model": "opus"}),
+                None,
+            ),
+            (json!({"subagent_type": "opus", "prompt": "x"}), None),
+            (json!({"subagent_type": "fable", "prompt": "x"}), None),
+            (json!({"subagent_type": "opus-1m", "prompt": "x"}), None),
+            // rush's other models: no definition of Claude's.
+            (json!({"subagent_type": "sol", "prompt": "x"}), None),
+            (json!({"subagent_type": "workhorse", "prompt": "x"}), None),
+        ];
+        for (input, want) in cases {
+            let a = agent(&t, input.clone());
+            let got = a.as_ref().map(|a| {
+                let o = &a.out["hookSpecificOutput"];
+                assert_eq!(o["permissionDecision"], "allow");
+                // The rest of the call as it was.
+                assert_eq!(o["updatedInput"]["prompt"], input["prompt"]);
+                assert_eq!(a.kind, "hook-model");
+                assert_eq!(a.fields["rule"], "agent-model");
+                o["updatedInput"]["model"].as_str().unwrap().to_string()
+            });
+            assert_eq!(got.as_deref(), want, "{input}");
+        }
+        // Off, or while your settings have rules about Agent, nothing.
+        let off = t.with(Rules {
+            agent_model: false,
+            ..Rules::ALL
+        });
+        assert_eq!(agent(&off, json!({"prompt": "x"})), None);
+        let claude = t.env.claude_dir.as_ref().unwrap();
+        fs::write(
+            claude.join("settings.json"),
+            r#"{"permissions":{"ask":["Agent(Explore)"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(agent(&t, json!({"prompt": "x"})), None);
     }
 
     /// A screenshot-sized PNG with something in it.
