@@ -408,7 +408,7 @@ pub fn context_guard_section(m: &Model) -> Section {
             if k == 0 {
                 "off".into()
             } else {
-                format!("over {k}k tokens")
+                format!("{k}k tokens")
             }
         },
     ));
@@ -417,7 +417,7 @@ pub fn context_guard_section(m: &Model) -> Section {
         cg::AGENT_MODEL,
         "Subagents that name no model",
         "An Agent call that names no model, of a type that would run on the session's model, runs on Sonnet, and the agent is told so; opus, fable, haiku, a definition with a model of its own and other makers' models are left as they are. Each is in the session's events as hook-model.",
-        &[("sonnet", "Sonnet"), ("off", "the session's model")],
+        &[("sonnet", "Sonnet"), ("off", "off")],
     ));
     let note = if g.on {
         "on unless you turn it off; Claude Code for now"

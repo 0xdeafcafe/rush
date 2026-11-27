@@ -2055,7 +2055,7 @@ fn usage_gathers_the_rules() {
         ("Shrink images agents read", "on"),
         ("  images cost at most", "1,568 tokens"),
         ("  contact sheet after", "8 images"),
-        ("Stop messaging full subagents", "over 150k tokens"),
+        ("Stop messaging full subagents", "150k tokens"),
         ("Subagents that name no model", "Sonnet"),
         ("Hand over near the end of context", "off"),
         ("Cheaper model for routine subagents", "off"),
