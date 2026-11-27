@@ -1439,7 +1439,7 @@ mod tests {
             ),
             (
                 "a first line cut short is passed over",
-                format!(r#"x","type":"assistant","message":{{"usage":{{"input_tokens":3}}}}}}"#)
+                r#"x","type":"assistant","message":{"usage":{"input_tokens":3}}}"#.to_string()
                     + "\n"
                     + user,
                 None,
