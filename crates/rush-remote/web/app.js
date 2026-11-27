@@ -49,11 +49,72 @@ const stateOf = i => i.alive === false ? (i.sleeping ? 'asleep' : 'stopped') : (
 const marks = {blocked: '●', working: '✻', starting: '✻', idle: '◆', asleep: '◇', stopped: '·'};
 const stateWords = (st, needs) => st === 'blocked' ? 'needs ' + (needs || 'you') : st;
 const state = (st, needs) => `<span class="st-${esc(st)}">${marks[st] || '·'} ${esc(stateWords(st, needs))}</span>`;
-// md is the little markdown agents write most: code blocks, code, bold
-const md = s => esc(s)
-  .replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, c) => `<pre>${c}</pre>`)
-  .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-  .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+// md is the markdown agents write: fenced code, headings, lists, tables,
+// quotes, rules and paragraphs; inline code, bold, italic, strikethrough and
+// links. Everything is escaped first; only http(s) links become anchors.
+const mdInline = t => {
+  const codes = [];
+  t = t.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+  t = t
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target=_blank rel=noopener>$1</a>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^\w*])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>')
+    .replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>')
+    .replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+  return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
+};
+const md = src => {
+  const L = esc(src).split('\n'), out = [];
+  const cells = r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  for (let i = 0; i < L.length;) {
+    const l = L[i];
+    let m;
+    if ((m = l.match(/^\s*(```|~~~)/))) {
+      const fence = m[1], body = [];
+      for (i++; i < L.length && !L[i].trim().startsWith(fence); i++) body.push(L[i]);
+      i++;
+      out.push(`<pre>${body.join('\n')}</pre>`);
+    } else if (!l.trim()) {
+      i++;
+    } else if ((m = l.match(/^(#{1,6})\s+(.*)$/))) {
+      out.push(`<h${m[1].length} class=md-h>${mdInline(m[2])}</h${m[1].length}>`); i++;
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) {
+      out.push('<hr>'); i++;
+    } else if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < L.length && /^\s*\|?\s*:?-{2,}/.test(L[i + 1])) {
+      const head = cells(l), rows = [];
+      for (i += 2; i < L.length && /^\s*\|.*\|\s*$/.test(L[i]); i++) rows.push(cells(L[i]));
+      out.push(`<div class=md-table><table><thead><tr>${head.map(c => `<th>${mdInline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${mdInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    } else if (/^\s*&gt;/.test(l)) {
+      const q = [];
+      for (; i < L.length && /^\s*&gt;/.test(L[i]); i++) q.push(L[i].replace(/^\s*&gt;\s?/, ''));
+      out.push(`<blockquote>${md(q.join('\n').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'))}</blockquote>`);
+    } else if (/^\s*([-*+]|\d+[.)])\s+/.test(l)) {
+      // a list, nested by indent
+      const items = [];
+      for (; i < L.length; i++) {
+        const x = L[i];
+        if ((m = x.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) items.push({d: m[1].length, ol: /\d/.test(m[2]), t: m[3]});
+        else if (x.trim() && /^\s+/.test(x) && items.length) items[items.length - 1].t += ' ' + x.trim();
+        else break;
+      }
+      const build = (k, depth) => {
+        const ol = items[k].ol, h = [];
+        while (k < items.length && items[k].d >= depth) {
+          if (items[k].d > depth) { const [inner, nk] = build(k, items[k].d); h[h.length - 1] = h[h.length - 1].replace(/<\/li>$/, inner + '</li>'); k = nk; continue; }
+          const t = items[k].t.replace(/^\[( |x)\]\s+/i, (_, c) => c === ' ' ? '☐ ' : '☑ ');
+          h.push(`<li>${mdInline(t)}</li>`); k++;
+        }
+        return [`<${ol ? 'ol' : 'ul'}>${h.join('')}</${ol ? 'ol' : 'ul'}>`, k];
+      };
+      out.push(build(0, items[0].d)[0]);
+    } else {
+      const p = [];
+      for (; i < L.length && L[i].trim() && !/^\s*(```|~~~|#{1,6}\s|&gt;|([-*+]|\d+[.)])\s+)/.test(L[i]) && !(/^\s*\|.*\|\s*$/.test(L[i]) && i + 1 < L.length && /^\s*\|?\s*:?-{2,}/.test(L[i + 1])); i++) p.push(mdInline(L[i]));
+      out.push(`<p>${p.join('<br>')}</p>`);
+    }
+  }
+  return out.join('');
+};
 
 // ── screens ──
 let scope = null;
@@ -933,7 +994,7 @@ function sessionScreen(id, init) {
       case 'sent': if (prep) break; live = null; put(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
       case 'delta': if (v.Kind === 0 && !prep) {
         if (!live) { live = put('<div class=say></div>'); live._s = ''; }
-        live._s += v.Text; live.textContent = live._s; down();
+        live._s += v.Text; live.innerHTML = md(live._s); down();
       } break;
       case 'message': {
         if (v.Parent) break;

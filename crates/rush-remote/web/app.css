@@ -76,3 +76,20 @@
 @media (max-width:40rem){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.stat b{font-size:17px}}
 .hidden{display:none!important}
 .say pre{white-space:pre;overflow-wrap:normal}
+
+.say{white-space:normal}
+.say>*+*{margin-top:calc(var(--spacing)*1.5)}
+.say .md-h{color:var(--color-bright);font-weight:var(--font-weight-semibold)}
+.say h1.md-h,.say h2.md-h{color:var(--color-orange)}
+.say ul,.say ol{padding-left:2.5ch}
+.say ul{list-style:'· ' outside}
+.say ol{list-style:decimal outside}
+.say li::marker{color:var(--color-dim)}
+.say blockquote{border-left:2px solid var(--color-edge);padding-left:calc(var(--spacing)*3);color:var(--color-sub)}
+.say hr{border-color:var(--color-faint)}
+.say a{color:var(--color-blue);text-decoration:underline}
+.say i{font-style:italic}
+.say .md-table{overflow-x:auto}
+.say table{border-collapse:collapse}
+.say th,.say td{border:1px solid var(--color-faint);padding:0 calc(var(--spacing)*2);text-align:left;vertical-align:top}
+.say th{color:var(--color-bright);font-weight:var(--font-weight-semibold)}
