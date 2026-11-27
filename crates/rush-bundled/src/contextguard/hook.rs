@@ -1144,21 +1144,21 @@ mod tests {
         }
         // Set smaller, it cuts sooner.
         let small = t.with(Rules {
-            cap_bytes: 16 * 1024,
+            cap_bytes: 8 * 1024,
             ..Rules::ALL
         });
-        let mid: String = (0..200)
+        let mid: String = (0..120)
             .map(|i| format!("{i:04} {}\n", "y".repeat(95)))
             .collect();
         let resp = json!({"tool_response": {"stdout": mid, "stderr": ""}});
         assert_eq!(
             bash(&t, "PostToolUse", "cat m.txt", resp.clone()),
             None,
-            "20 KB under 32"
+            "12 KB under 16"
         );
         assert!(
             bash(&small, "PostToolUse", "cat m.txt", resp).is_some(),
-            "20 KB over 16"
+            "12 KB over 8"
         );
     }
 

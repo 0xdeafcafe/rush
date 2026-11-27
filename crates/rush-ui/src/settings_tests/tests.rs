@@ -2051,7 +2051,7 @@ fn usage_gathers_the_rules() {
         ("  after", "3 in a row"),
         ("Trim command output", "on"),
         ("  longer than", "600 lines"),
-        ("  or more than", "32 KB"),
+        ("  or more than", "16 KB"),
         ("Shrink images agents read", "on"),
         ("  images cost at most", "1,568 tokens"),
         ("  contact sheet after", "8 images"),
