@@ -30,7 +30,7 @@
     Shrink images agents read      ‹ on           ›                         │ events as cache-kept, with its cost.
       images cost at most          ‹ 1,568 tokens ›                         │
       contact sheet after          ‹ 8 images     ›                         │ on: idle sessions' caches are kept for
-    Stop messaging full subagents  ‹ over 150k t… ›                         │ the time below, then lapse.
+    Stop messaging full subagents  ‹ 150k tokens  ›                         │ the time below, then lapse.
     Subagents that name no model   ‹ Sonnet       ›                         │
                                                                             │
   Emeritus · off until you turn it on; reaches a running agent at its next… │
