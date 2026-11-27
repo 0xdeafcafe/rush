@@ -203,7 +203,11 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
             }
             let id = text(&inp.tool_input, "id");
             let (name, tokens) = session_context(&env.dir, id)?;
-            let r = rules::lane(env.rules, if name.is_empty() { id } else { &name }, tokens)?;
+            let r = rules::lane(
+                env.rules,
+                if name.is_empty() { id } else { name.as_str() },
+                tokens,
+            )?;
             Some(deny(r, &inp, json!({"to": id, "tokens": tokens})))
         }
         ("PreToolUse" | "", "Agent" | "Task") => agent_pre(&inp, env),
@@ -1107,8 +1111,8 @@ mod tests {
             .collect();
         let cases: Vec<(&str, String, bool)> = vec![
             ("cat a.rs", "a  \n\n\n\nb\n".into(), false),
-            ("sed -n 1,300p big.rs", wide.clone(), true),
-            ("cargo test 2>&1 | tail -1000", tall.clone(), true),
+            ("sed -n 1,300p big.rs", wide, true),
+            ("cargo test 2>&1 | tail -1000", tall, true),
         ];
         for (command, out, cut) in cases {
             let resp = json!({"tool_response": {"stdout": out, "stderr": ""}});
