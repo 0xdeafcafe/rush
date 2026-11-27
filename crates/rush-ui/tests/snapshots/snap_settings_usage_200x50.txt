@@ -19,8 +19,6 @@
                            │                                                                                                            │ no turn runs, nothing notifies. It only does this for a
                            │ Context guard · on unless you turn it off; Claude Code for now                                             │ session that went idle within the time below, with a
                            │   Don't re-read unchanged files        ‹ on           ›                                                    │ context worth it; never one asleep, done, held, or on an
-^[[1m^[[91merror^[[0m: test failed, to rerun pass `-p rush-ui --test render`
-^[[1m^[[92m     Running^[[0m tests/threads.rs (target/debug/deps/threads-342540a3cb24f3ce)
                            │     smallest file it applies to        ‹ 2 KB         ›                                                    │ account past its pace, nor while you're away. Each is in
                            │   Don't read huge files whole          ‹ on           ›                                                    │ the session's events as cache-kept, with its cost.
                            │     huge means over                    ‹ 1,000 lines  ›                                                    │
