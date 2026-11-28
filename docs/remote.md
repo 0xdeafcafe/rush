@@ -20,7 +20,9 @@ server in front of those hosts. This is the simpler plan that replaced
   - `GET /api/sessions/{id}/events` is a Server-Sent Events stream. A running
     host's lines are decoded and sent as neutral events (`{"t":…,"e":…}`),
     with the host's replay first. A host that isn't running sends its saved
-    transcript tail instead. Reading never wakes a sleeping host. History
+    transcript tail instead, and when its info changes afterwards sends the
+    info alone unless the transcript changed too (a `reset` then says to start
+    over). Reading never wakes a sleeping host. History
     starts with the transcript's last 600 events (a `cut` event says there's
     more); `?full=1` sends all of it (up to 50,000), which the web app's
     *Show earlier* and `rush remote attach` ask for.

@@ -802,6 +802,51 @@ fn events_of_a_stopped_session() {
     assert!(got.contains("\"name\":\"past\""), "{got}");
 }
 
+/// A stopped session whose info changes is sent its transcript again only
+/// when that has changed too: the web app would draw it all again.
+#[test]
+fn a_stopped_sessions_history_is_sent_when_it_changes() {
+    use crate::server::stopped_frames;
+    let types = |frames: Vec<Vec<u8>>| -> Vec<String> {
+        frames
+            .iter()
+            .map(|f| {
+                let v: Value = serde_json::from_slice(f).unwrap();
+                v["t"].as_str().unwrap().to_string()
+            })
+            .collect()
+    };
+    let said = || vec![br#"{"t":"message","e":{"Role":"assistant"}}"#.to_vec()];
+    let mut more = said();
+    more.push(br#"{"t":"turn_end","e":{}}"#.to_vec());
+    let mut sent = None;
+    for (name, history, want) in [
+        (
+            "the first time, all of it",
+            said(),
+            vec!["reset", "info", "message"],
+        ),
+        ("its info alone changed", said(), vec!["info"]),
+        ("and again", said(), vec!["info"]),
+        (
+            "the transcript grew",
+            more.clone(),
+            vec!["reset", "info", "message", "turn_end"],
+        ),
+        ("and is held", more, vec!["info"]),
+        ("it was cleared", vec![], vec!["reset", "info"]),
+    ] {
+        let info = serde_json::json!({ "name": name });
+        let got = stopped_frames(&info, history, &mut sent);
+        assert!(
+            got.iter()
+                .any(|f| String::from_utf8_lossy(f).contains(name)),
+            "{name}: the info goes every time"
+        );
+        assert_eq!(types(got), want, "{name}");
+    }
+}
+
 #[test]
 fn the_sessions_stream_starts_with_the_list() {
     let _h = home();
