@@ -802,6 +802,44 @@ fn events_of_a_stopped_session() {
     assert!(got.contains("\"name\":\"past\""), "{got}");
 }
 
+/// A decisions card can be set aside while its session sleeps, without
+/// waking it; nothing else reaches a session that isn't running.
+#[test]
+fn a_sleeping_sessions_decisions_can_be_dismissed() {
+    let _h = home();
+    let s = server(vec![]);
+    let dir = rush_host::dir("e5e5e5e5");
+    std::fs::create_dir_all(&dir).unwrap();
+    let info = Info {
+        id: "e5e5e5e5".into(),
+        state: "idle".into(),
+        host_pid: 0,
+        updated_at: Time::now(),
+        decisions: Some(rush_core::event::Question {
+            id: "decisions-1".into(),
+            ..Default::default()
+        }),
+        ..Info::default()
+    };
+    std::fs::write(dir.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    let auth = bearer(TOKEN);
+    let hdr = [
+        ("Authorization", auth.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let op = |b: &str| call(&s, "POST", "/api/sessions/e5e5e5e5/op", b, &hdr).status;
+    let card = || rush_host::read_info("e5e5e5e5").unwrap().decisions;
+    assert_eq!(op(r#"{"op":"interrupt"}"#), 409);
+    assert_eq!(op(r#"{"op":"decisions_dismiss","id":"decisions-0"}"#), 202);
+    assert!(card().is_some(), "another card's id leaves this one");
+    assert_eq!(op(r#"{"op":"decisions_dismiss","id":"decisions-1"}"#), 202);
+    assert!(card().is_none(), "set aside");
+    std::fs::remove_file(dir.join("decisions-dismissed")).unwrap();
+    assert!(card().is_some());
+    assert_eq!(op(r#"{"op":"decisions_dismiss"}"#), 202);
+    assert!(card().is_none(), "with no id, the card that's there");
+}
+
 /// A stopped session whose info changes is sent its transcript again only
 /// when that has changed too: the web app would draw it all again.
 #[test]
