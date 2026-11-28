@@ -965,3 +965,169 @@ fn until(what: &str, ok: impl Fn() -> bool) {
     }
     panic!("timed out: {what}");
 }
+
+/// A shell command runs as a login shell's one command, in its folder,
+/// with nothing to read; what it printed is kept from the end, and it and
+/// what it started are stopped when its time is up.
+#[test]
+fn run_shell() {
+    use crate::shell::{ShellReply, run_shell};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("here.txt"), "").unwrap();
+    let long = Duration::from_secs(30);
+    let ok = |out: &str| ShellReply {
+        out: out.as_bytes().to_vec(),
+        code: Some(0),
+        ..ShellReply::default()
+    };
+    for (name, command, limit, most, want) in [
+        ("in the folder", "ls", long, 1024, ok("here.txt\n")),
+        (
+            "both streams",
+            "echo a; echo b >&2",
+            long,
+            1024,
+            ok("a\nb\n"),
+        ),
+        (
+            "nothing to read",
+            "cat; echo done",
+            long,
+            1024,
+            ok("done\n"),
+        ),
+        (
+            "its exit status",
+            "echo no; exit 3",
+            long,
+            1024,
+            ShellReply {
+                out: b"no\n".to_vec(),
+                code: Some(3),
+                ..ShellReply::default()
+            },
+        ),
+        (
+            "the end of a long output",
+            "printf 0123456789",
+            long,
+            4,
+            ShellReply {
+                out: b"6789".to_vec(),
+                code: Some(0),
+                cut: true,
+                ..ShellReply::default()
+            },
+        ),
+        (
+            "stopped when its time is up, with what it started",
+            "echo began; sleep 600 & sleep 600",
+            Duration::from_millis(300),
+            1024,
+            ShellReply {
+                out: b"began\n".to_vec(),
+                error: "stopped after 0s".into(),
+                ..ShellReply::default()
+            },
+        ),
+    ] {
+        let got = run_shell(dir.path(), "/bin/sh", command, limit, most);
+        assert_eq!(got, want, "{name}");
+    }
+    let none = run_shell(&dir.path().join("gone"), "/bin/sh", "ls", long, 1024);
+    assert!(none.code.is_none() && !none.error.is_empty(), "{none:?}");
+}
+
+#[test]
+fn shell_time() {
+    use crate::shell::shell_time;
+    for (asked, want) in [(0, 60), (5, 5), (600, 600), (86400, 600)] {
+        assert_eq!(shell_time(asked), Duration::from_secs(want), "{asked}");
+    }
+}
+
+/// The web app's shell: one command in the folder a session of this
+/// machine works in, for whoever serve lets in, unless remote.json turns
+/// it off; never in a folder the request names, rush's own, or one
+/// outside the workspaces.
+#[test]
+fn shell_endpoint() {
+    let _h = home();
+    let s = server(vec![]);
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::write(ws.path().join("here.txt"), "").unwrap();
+    let put = |id: &str, cwd: &str, remote: &str| {
+        let dir = rush_host::dir(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let info = Info {
+            id: id.into(),
+            cwd: cwd.into(),
+            remote: remote.into(),
+            updated_at: Time::now(),
+            ..Info::default()
+        };
+        std::fs::write(dir.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    };
+    let here = ws.path().to_string_lossy().into_owned();
+    put("a1a1a1a1", &here, "");
+    put("b2b2b2b2", &here, "box");
+    put("c3c3c3c3", &crate::config::dir().to_string_lossy(), "");
+    put("d4d4d4d4", &ws.path().join("gone").to_string_lossy(), "");
+    let auth = bearer(TOKEN);
+    let hdr = [
+        ("Authorization", auth.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let run = |s: &Arc<Server>, id: &str, body: &str, hdr: &[(&str, &str)]| {
+        let r = call(s, "POST", &format!("/api/sessions/{id}/shell"), body, hdr);
+        let v: Value = serde_json::from_slice(r.bytes()).unwrap_or_default();
+        (r.status, v)
+    };
+    let ls = r#"{"command":"ls"}"#;
+
+    let (st, v) = run(&s, "a1a1a1a1", ls, &hdr);
+    assert_eq!(st, 200);
+    assert_eq!(v["out"], "aGVyZS50eHQK", "here.txt, base64");
+    assert_eq!(v["code"], 0);
+    let (st, v) = run(&s, "a1a1a1a1", r#"{"command":"exit 7","cwd":"/"}"#, &hdr);
+    assert_eq!((st, &v["code"]), (200, &serde_json::json!(7)));
+
+    for (name, id, body, hdr, want) in [
+        ("no token", "a1a1a1a1", ls, &hdr[1..], 401),
+        (
+            "no command",
+            "a1a1a1a1",
+            r#"{"command":"  "}"#,
+            &hdr[..],
+            400,
+        ),
+        ("no such session", "f0f0f0f0", ls, &hdr[..], 404),
+        ("a bad id", "..", ls, &hdr[..], 404),
+        ("another machine's session", "b2b2b2b2", ls, &hdr[..], 403),
+        ("rush's own folder", "c3c3c3c3", ls, &hdr[..], 403),
+        ("a folder that's gone", "d4d4d4d4", ls, &hdr[..], 409),
+    ] {
+        assert_eq!(run(&s, id, body, hdr).0, want, "{name}");
+    }
+    assert_eq!(
+        call(&s, "GET", "/api/sessions/a1a1a1a1/shell", "", &hdr).status,
+        405
+    );
+
+    let other = tempfile::tempdir().unwrap();
+    let mut c = s.config.clone();
+    c.workspaces = vec![other.path().to_string_lossy().into_owned()];
+    let fenced = Arc::new(Server::new(
+        c,
+        TOKEN.into(),
+        rush_core::adapter::Registry::new(),
+    ));
+    assert_eq!(
+        run(&fenced, "a1a1a1a1", ls, &hdr).0,
+        403,
+        "outside the workspaces"
+    );
+
+    update_config(|c| c.no_shell = true).unwrap();
+    assert_eq!(run(&s, "a1a1a1a1", ls, &hdr).0, 403, "turned off");
+}

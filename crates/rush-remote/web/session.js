@@ -14,6 +14,7 @@ const glyphs = {Bash: '$', Edit: '✎', MultiEdit: '✎', Write: '✎', Read: '�
 const did = {Bash: ['ran', 'command'], Edit: ['edited', 'file'], MultiEdit: ['edited', 'file'], Write: ['wrote', 'file'], Read: ['read', 'file'], Grep: ['searched', 'time'], Glob: ['searched', 'time'],
   WebFetch: ['fetched', 'page'], WebSearch: ['searched the web', 'time'], Task: ['ran', 'subagent'], Agent: ['ran', 'subagent']};
 const OUT_MOST = 6000;
+const shellRuns = new Map(); // what a session's shell has run, while the page lives
 let earlier = null; // where "show earlier" was pressed, to come back to
 
 function sessionScreen(id, full) {
@@ -30,8 +31,8 @@ function sessionScreen(id, full) {
         <div class=composer id=composer><div id=pics class=chips></div>
           <fieldset class=box><legend></legend><span class=prompt aria-hidden=true>❯</span><textarea id=txt rows=1 placeholder="Message this agent" aria-label=Message enterkeyhint=${fine.matches ? 'send' : 'enter'} autocapitalize=sentences></textarea>
             <button class="key key-bad" id=halt hidden aria-label="Stop the turn">■ stop</button><button class="key key-on" id=send>send</button></fieldset>
-          <div class=hints><button id=pic>image</button><input id=file type=file accept="image/*" multiple hidden><span class=sep>·</span><button id=steer hidden title="Into the turn under way, not after it">steer</button><span class=sep id=steersep hidden>·</span>
-            <button id=modeb hidden></button><span class=keys>enter sends · shift enter for a new line</span></div></div>
+          <div class=hints><button id=pic>image</button><input id=file type=file accept="image/*" multiple hidden><span class=sep>·</span><button id=shb title="Run a command in this session's folder (or start a message with !)">shell</button><span class=sep>·</span><button id=steer hidden title="Into the turn under way, not after it">steer</button><span class=sep id=steersep hidden>·</span>
+            <button id=modeb hidden></button><span class=keys>enter sends · shift enter for a new line · ! runs a command</span></div></div>
       </div></div></div>`;
   const scroll = $('#scroll'), log = $('#log'), box = $('#txt'), jump = $('#jump');
   const op = o => post(opPath, o).then(() => true, e => { failed(e); return false; });
@@ -163,6 +164,10 @@ function sessionScreen(id, full) {
   const say = async guide => {
     const sent = box.value, t = sent.trim(), att = pics.slice();
     if ((!t && !att.length) || sending) return;
+    if (t[0] === '!' && !att.length && !guide) {
+      if (t.length > 1) shell(t.slice(1), true); else shell();
+      box.value = ''; store.set('draft.' + key, ''); grow(); drawBang(); return;
+    }
     sending = true; $$('#send,#steer').forEach(b => b.disabled = true); $('#send').classList.add('busy');
     try {
       await post(opPath, {op: 'send', text: t, guide, pictures: att.length ? att : undefined});
@@ -177,6 +182,7 @@ function sessionScreen(id, full) {
       sending = false; $$('#send,#steer').forEach(b => b.disabled = false); $('#send').classList.remove('busy');
     }
   };
+  const drawBang = () => { const bang = box.value[0] === '!'; $('#composer').toggleAttribute('data-bang', bang); $('#send').textContent = bang ? 'run' : 'send'; };
   $('#send').onclick = () => say(false);
   $('#steer').onclick = () => say(true);
   $('#halt').onclick = () => { buzz(30); op({op: 'interrupt'}); };
@@ -194,7 +200,7 @@ function sessionScreen(id, full) {
   };
   const pickMenu = i => { box.value = '/' + menuList[i].Name + ' '; menu.hidden = true; menuList = []; box.focus(); store.set('draft.' + key, box.value); };
   menu.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pickMenu(+b.dataset.i); };
-  box.oninput = () => { grow(); store.set('draft.' + key, box.value); recall = -1; drawMenu(); };
+  box.oninput = () => { grow(); store.set('draft.' + key, box.value); recall = -1; drawMenu(); drawBang(); };
   box.onkeydown = e => {
     if (e.isComposing) return;
     if (menuList.length) {
@@ -215,7 +221,7 @@ function sessionScreen(id, full) {
       box.value = recall < 0 ? '' : S.sents[recall]; grow();
     }
   };
-  grow();
+  grow(); drawBang();
   if (fine.matches) box.focus();
 
   // ── changes: git's diff of the working folder against HEAD, and what's untracked, read on its machine ──
@@ -251,6 +257,77 @@ function sessionScreen(id, full) {
           + files.map(f => `<details class=file${files.length <= 4 ? ' open' : ''}><summary><span class=path>${esc(f.name)}</span>${f.made ? '<span class=c-dim>new</span>' : f.gone ? '<span class=c-dim>deleted</span>' : ''}<span class=add>+${f.add}</span><span class=del>−${f.del}</span></summary><pre class=wrap>${f.body ? diffLines(f.body) : '<span class=hunk>no text to show (a binary file, or only its mode changed)</span>'}</pre></details>`).join('')
           + (un.length ? `<details class=file><summary><span class=path>untracked</span><span class=c-dim>${un.length}</span></summary><pre class=wrap>${esc(un.join('\n'))}</pre></details>` : '');
     } catch (e) { if (e === 401) return signIn(); $('#chgbody', d).innerHTML = `<div class=err-line>${esc(e)}</div>`; }
+  };
+
+  // ── the shell: one command at a time in the session's folder, what `!` does in rush ──
+  const shKey = () => 'sh.' + machine, runs = shellRuns.get(key) || shellRuns.set(key, []).get(key);
+  const plainOut = t => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]/g, '').replace(/^.*\r(?!\n)/gm, '').replace(/\r/g, '');
+  const toAgent = r => `I ran \`${r.cmd}\` (${r.code === null ? r.error || 'no exit' : 'exit ' + r.code}):\n\`\`\`\n${r.out.trimEnd().split('\n').slice(-80).join('\n').slice(-OUT_MOST)}\n\`\`\`\n`;
+  let shOpen = null;
+  const shDraw = () => {
+    if (!shOpen) return;
+    const lg = $('#shlog', shOpen), past = store.get(shKey(), []), busy = runs.some(r => r.busy);
+    lg.innerHTML = runs.length ? runs.map((r, i) => `<div class=run data-i=${i} data-s=${r.busy ? 'run' : r.code === 0 ? 'ok' : 'err'}>
+        <div class=run-cmd><span class=prompt aria-hidden=true>$</span><code>${hl(r.cmd, 'sh')}</code></div>
+        ${r.out ? `<pre class=wrap>${r.cut ? '<span class=hunk>… the start was dropped</span>\n' : ''}${esc(r.out)}</pre>` : ''}
+        <div class=run-foot>${r.busy ? `<span class=mark-run aria-hidden=true>✻</span> running` : `<span class=run-exit>${r.code === null ? esc(r.error || 'failed') : 'exit ' + r.code}</span> · ${dur(r.took / 1000)}`}
+          ${r.busy ? '' : `<span class=grow></span><button data-a=agent>to the agent</button><button data-a=copy>copy</button><button data-a=again>again</button>${/^stopped after/.test(r.error || '') && r.limit < 600 ? '<button data-a=long>again, 10 min</button>' : ''}`}</div></div>`).join('')
+      : `<div class=empty><p>Runs in <span class=c-blue>${esc(home(info.cwd))}</span> on ${esc(machine)}, with your login shell. A command gets a minute, with nothing to type into.</p></div>`;
+    lg.scrollTop = lg.scrollHeight;
+    $('#shquick', shOpen).innerHTML = [...new Set([...past, 'git status', 'git log --oneline -10', 'ls -la'])].slice(0, 12).map(c => `<button class=key data-c="${esc(c)}">${esc(c)}</button>`).join('');
+    $('#shgo', shOpen).disabled = busy; $('#shgo', shOpen).classList.toggle('busy', busy);
+  };
+  const shRun = async (cmd, limit = 60) => {
+    cmd = cmd.trim();
+    if (!cmd || runs.some(r => r.busy)) return;
+    store.set(shKey(), [cmd, ...store.get(shKey(), []).filter(c => c !== cmd)].slice(0, 30));
+    const r = {cmd, out: '', code: null, error: '', busy: true, took: 0, limit, cut: false}, t0 = Date.now();
+    runs.push(r); if (runs.length > 40) runs.shift();
+    shDraw();
+    try {
+      const v = await (await post(`/sessions/${enc(id)}/shell`, {command: cmd, timeout: limit})).json();
+      r.out = plainOut(new TextDecoder().decode(Uint8Array.from(atob(v.out || ''), c => c.charCodeAt(0))));
+      r.code = v.code ?? null; r.error = v.error || ''; r.cut = !!v.cut;
+    } catch (e) {
+      if (e === 401) return signIn();
+      r.error = String(e);
+    }
+    r.busy = false; r.took = Date.now() - t0; buzz(r.code === 0 ? 10 : [20, 40, 20]);
+    shDraw();
+    if (!shOpen && sc.live) toast(`${r.cmd}: ${r.code === null ? r.error : 'exit ' + r.code}`, r.code === 0 ? '' : 'bad', {name: 'see', run: () => shell()});
+  };
+  const shell = (cmd, run) => {
+    if (!shOpen) {
+      shOpen = sheet(`<div class=shell><div id=shlog class=shlog role=log aria-label="Shell output"></div><div id=shquick class=shquick aria-label="Earlier commands"></div>
+        <form id=shform><fieldset class=box><legend></legend><span class=prompt aria-hidden=true>$</span><input id=shin aria-label=Command placeholder="a command" autocapitalize=off autocorrect=off autocomplete=off spellcheck=false enterkeyhint=go><button class="key key-on" id=shgo>run</button></fieldset></form></div>`,
+        {title: 'Shell in ' + home(info.cwd), big: true});
+      const d = shOpen, inp = $('#shin', d);
+      let at = -1;
+      d.addEventListener('close', () => { if (shOpen === d) shOpen = null; });
+      $('#shform', d).onsubmit = e => { e.preventDefault(); const c = inp.value; inp.value = ''; at = -1; shRun(c); };
+      inp.onkeydown = e => {
+        const past = store.get(shKey(), []);
+        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !past.length) return;
+        e.preventDefault();
+        at = Math.max(-1, Math.min(past.length - 1, at + (e.key === 'ArrowUp' ? 1 : -1)));
+        inp.value = at < 0 ? '' : past[at];
+      };
+      $('#shquick', d).onclick = e => { const b = e.target.closest('[data-c]'); if (b) { inp.value = b.dataset.c; inp.focus(); } };
+      $('#shlog', d).onclick = e => {
+        const b = e.target.closest('[data-a]'), r = b && runs[+b.closest('.run').dataset.i];
+        if (!r) return;
+        if (b.dataset.a === 'copy') copy(r.out || r.cmd);
+        if (b.dataset.a === 'again') shRun(r.cmd, r.limit);
+        if (b.dataset.a === 'long') shRun(r.cmd, 600);
+        if (b.dataset.a === 'agent') {
+          box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + toAgent(r);
+          store.set('draft.' + key, box.value); d.close(); grow(); box.focus(); box.scrollTop = box.scrollHeight;
+        }
+      };
+      if (fine.matches || !runs.length) inp.focus();
+    }
+    if (cmd) { if (run) shRun(cmd); else $('#shin', shOpen).value = cmd; }
+    shDraw();
   };
 
   // ── details: how it is, and what can be done with it from here ──
@@ -292,11 +369,12 @@ function sessionScreen(id, full) {
     };
   };
   $('#modeb').onclick = details;
+  $('#shb').onclick = () => shell();
   bar({title: esc(info.name || id), actions: [action('subs', '⇉', () => openSubs(''), 'Subagents and background work'), action('chg', 'changes', changes), action('info', '⋯', details, 'Details')]});
   $('#subs').hidden = true;
-  view.keys = {c: changes, i: details, s: () => openSubs(''), e: () => box.focus(),
+  view.keys = {c: changes, i: details, s: () => openSubs(''), '!': () => shell(), e: () => box.focus(),
     'alt+KeyA': () => $('.ask [data-k=a]')?.click(), 'alt+KeyD': () => $('.ask [data-k=d]')?.click()};
-  view.acts = [{name: 'Changes in this session', hint: 'c', run: changes}, {name: 'Details of this session', hint: 'i', run: details},
+  view.acts = [{name: 'Changes in this session', hint: 'c', run: changes}, {name: 'Details of this session', hint: 'i', run: details}, {name: 'Shell in this folder', hint: '!', run: () => shell()},
     {name: 'Stop the turn', run: () => $('#halt').click()}, {name: 'Subagents and background work', hint: 's', run: () => openSubs('')}, {name: 'New session in this folder', run: () => { newIn = info.cwd || ''; go('#/new'); }},
     {name: 'Whole history of this session', run: () => go(sessionHash(id) + '/all')}];
 

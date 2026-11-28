@@ -26,6 +26,7 @@ pub mod plugins;
 pub mod push;
 pub mod server;
 pub mod service;
+pub mod shell;
 pub mod sshd;
 pub mod sshkey;
 pub mod sshwire;

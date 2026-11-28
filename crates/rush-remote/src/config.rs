@@ -59,6 +59,10 @@ pub struct Config {
     /// Lets in rush itself over SSH: the remote-ssh plugin's.
     #[serde(skip_serializing_if = "is_false")]
     pub ssh: bool,
+    /// Keeps the web app from running shell commands in a session's
+    /// folder.
+    #[serde(rename = "noShell", skip_serializing_if = "is_false")]
+    pub no_shell: bool,
     /// Has serve keep the peers' sessions in this machine's rush.
     #[serde(rename = "attachPeers", skip_serializing_if = "is_false")]
     pub attach_peers: bool,

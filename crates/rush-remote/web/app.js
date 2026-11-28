@@ -630,7 +630,7 @@ function shortcuts() {
   sheet(`<dl class=keys-list>${[
     [`${mod} K`, 'go to a session, or do something'], ['/', 'search the sessions'], ['n', 'a new session'], ['j  k', 'down and up the list; enter opens'],
     ['alt ↓  alt ↑', 'the next session, the one before'], ['esc', 'back to the sessions; out of a box'], ['enter', 'send (shift enter for a new line)'], [`${mod} enter`, 'steer: into the turn under way'],
-    ['ctrl C', 'stop the turn, when the box is empty'], ['alt A  alt D', 'allow, deny the approval waiting'], ['c', 'changes'], ['s', 'subagents and background work'], ['i', 'details'], ['e', 'into the message box'], ['?', 'these'],
+    ['ctrl C', 'stop the turn, when the box is empty'], ['alt A  alt D', 'allow, deny the approval waiting'], ['c', 'changes'], ['s', 'subagents and background work'], ['!', 'the shell, in the session\'s folder'], ['i', 'details'], ['e', 'into the message box'], ['?', 'these'],
   ].map(([k, w]) => `<dt>${k.split('  ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</dt><dd>${esc(w)}</dd>`).join('')}</dl>`, {title: 'Keyboard shortcuts', sc: null});
 }
 $('#keys').onclick = shortcuts;
