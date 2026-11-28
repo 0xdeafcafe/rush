@@ -474,7 +474,7 @@ impl Server {
             err = rush_host::ensure(id, "").err().map(|e| e.to_string());
         } else if let Err(e) = &info {
             err = Some(e.to_string());
-        } else if !running {
+        } else if !running && o.op != "decisions_dismiss" {
             err = Some("the session isn't running".into());
         }
         let mut f = json!({ "op": o.op, "woke": woke });
@@ -490,6 +490,20 @@ impl Server {
         rush_host::events::log_event(id, "remote-op", f);
         if let Some(e) = err {
             return fail(409, &e);
+        }
+        if !running && o.op == "decisions_dismiss" {
+            // A card set aside while its session sleeps: without waking
+            // it, as rush does (decisions.go:431). The op's id, or with
+            // none the card that's there.
+            let dec = match (&o.id, info.ok().and_then(|i| i.decisions)) {
+                (given, _) if !given.is_empty() => given.clone(),
+                (_, Some(d)) => d.id,
+                _ => return Response::new(202, Vec::new()),
+            };
+            return match rush_host::decisions::dismiss_asleep(id, &dec) {
+                Ok(()) => Response::new(202, Vec::new()),
+                Err(e) => fail(500, &e.to_string()),
+            };
         }
         let c = match rush_host::Client::dial(id) {
             Ok(c) => c,

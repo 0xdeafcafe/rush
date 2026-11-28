@@ -59,8 +59,10 @@ server in front of those hosts. This is the simpler plan that replaced
   - `POST /api/sessions/{id}/op` sends one host op from an allowlist: send,
     allow/deny, interrupt, stop, model/effort/mode, stop_task, background,
     queue ops, away/back, limit (carry on at the reset or not), context,
-    tell (a subagent) and without. `send` wakes a sleeping host first
-    (`host.Ensure`), as `rush session send` does. A send's images come as
+    tell (a subagent), decisions_dismiss and without. `send` wakes a
+    sleeping host first (`host.Ensure`), as `rush session send` does;
+    `decisions_dismiss` sets a sleeping session's card aside without waking
+    it, as rush does; any other op to a host that isn't running answers 409. A send's images come as
     bytes (`pictures`: png, jpeg, gif or webp, at most 8, each under 20 MB, 64 MB a message);
     serve writes them to the session's scratch folder and the host reads them
     from there, so no client path ever reaches the agent.
@@ -148,6 +150,12 @@ server in front of those hosts. This is the simpler plan that replaced
     history; one that is what's already drawn draws nothing. A reader keeps
     their place, an opened step stays open, a decisions card stays as filled
     in.
+  - A decisions card lists each decision's options with what each means,
+    the agent's pick chosen to start with; a pick again lets it go, and your
+    own words stand in for one. What's picked and typed is the tab's until
+    sent (`sessionStorage`), so the card comes back as it was left, and one
+    answered or dismissed stays gone while serve still tells of it. It goes
+    only when serve has taken the answer.
   - A session carries tabs beside its conversation: its **subagents** (each
     one's status, model and activity, its own conversation a sheet away),
     its **shells** (its tasks and background commands, to stop or read),

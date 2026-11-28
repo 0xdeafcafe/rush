@@ -901,34 +901,56 @@ function sessionScreen(id, init) {
 
   // decisions: the block its last turn ended with (info.decisions), the agent's
   // picks chosen to start with. The answers go as your next message, in the
-  // block's numbering ("1a. Topic: label", "2: your words"); dismiss sends nothing.
-  let decided = null, decEl = null;
+  // block's numbering ("1a. Topic: label", "2: your words"); dismiss sends
+  // nothing. What you've picked and typed is this tab's until it's sent, so
+  // a card drawn again (a reload, a tab and back) comes back as you left it;
+  // and one answered or set aside stays gone while serve still tells of it.
+  const decKey = 'rush.decisions.' + machine + '/' + id;
+  const kept = () => { try { return JSON.parse(sessionStorage.getItem(decKey)) || {}; } catch { return {}; } };
+  const keep = v => { try { sessionStorage.setItem(decKey, JSON.stringify(v)); } catch {} };
+  let decided = kept().gone || null, decEl = null;
   const decisionsEl = v => {
     const a = document.createElement('div'); a.className = 'ask';
-    const ans = {};
-    (v.Asks || []).forEach((q, n) => { const p = (q.Options || []).find(o => o.Picked); if (p) ans[n] = p.Label; });
-    a.innerHTML = `<h3>decide</h3>` + (v.Asks || []).map((q, n) => `<div class=space-y-2><p class=text-text>${esc(q.Text)}</p><div class=choices>${(q.Options || []).map(o =>
-      `<button class="key choice${o.Picked ? ' on' : ''}" data-n="${n}" data-l="${esc(o.Label)}" title="${esc(o.Description)}">${esc(o.Label)}${o.Picked ? ' ★' : ''}</button>`).join('')}</div>
-      <input class=field data-own="${n}" placeholder="or in your own words"></div>`).join('') +
+    const was = kept(), mine = was.id === v.ID, ans = mine ? was.ans || {} : {}, own = mine ? was.own || {} : {};
+    if (!mine) (v.Asks || []).forEach((q, n) => { const p = (q.Options || []).find(o => o.Picked); if (p) ans[n] = p.Label; });
+    const save = () => keep({id: v.ID, ans, own});
+    // an ask's text ends with its own heading again ("1. Topic"): said once
+    const said = q => (q.Text || '').replace(new RegExp('\\n*^\\s*' + String(q.ID).replace(/\W/g, '\\$&') + '[.)]\\s.*$', 'm'), '').trim();
+    a.innerHTML = `<h3>${(v.Asks || []).length > 1 ? (v.Asks || []).length + ' decisions' : 'decide'}</h3>` + (v.Asks || []).map((q, n) => `<div class=decision><p class=text-bright><span class=text-dim>${esc(q.ID)}.</span> <b>${esc(q.Header || q.Text)}</b></p>
+      ${q.Header && said(q) ? `<div class=why>${md(said(q))}</div>` : ''}<div class="choices choices-col">${(q.Options || []).map(o =>
+      `<button class="key choice${ans[n] === o.Label && !own[n] ? ' on' : ''}" data-n="${n}" data-l="${esc(o.Label)}"><span class=choice-k>${esc(o.Key)}</span><span class=choice-t>${esc(o.Label)}${o.Picked ? ' <span class=choice-pick>★ its pick</span>' : ''}${o.Description ? `<small>${esc(o.Description)}</small>` : ''}</span></button>`).join('')}</div>
+      <input class=field data-own="${n}" value="${esc(own[n] || '')}" placeholder="or in your own words" aria-label="Decision ${esc(q.ID)} in your own words" enterkeyhint=done></div>`).join('') +
       '<div class=actions><button class="key key-on" data-k=ok>send answers</button><button class=key data-k=no>dismiss</button></div>';
-    a.onclick = ev => {
+    a.oninput = ev => {
+      const n = ev.target.dataset.own;
+      if (n === undefined) return;
+      own[n] = ev.target.value; save();
+      // your own words stand in for a pick
+      $$(`.choice[data-n="${n}"]`, a).forEach(x => x.classList.toggle('on', !own[n].trim() && ans[n] === x.dataset.l));
+    };
+    a.onclick = async ev => {
       const b = ev.target.closest('button');
       if (!b) return;
       if (b.dataset.l) {
-        ans[b.dataset.n] = b.dataset.l;
-        $$('button', b.parentNode).forEach(x => x.classList.remove('on'));
-        b.classList.add('on');
-      } else if (b.dataset.k === 'no') {
-        decided = v.ID; a.remove(); op({op: 'decisions_dismiss', id: v.ID});
-      } else if (b.dataset.k === 'ok') {
-        const text = (v.Asks || []).map((q, n) => {
-          const own = $(`[data-own="${n}"]`, a).value.trim(), pick = ans[n];
-          if (own) return `${q.ID}: ${own}`;
-          const o = (q.Options || []).find(o => o.Label === pick);
+        const n = b.dataset.n, again = ans[n] === b.dataset.l && !(own[n] || '').trim();
+        // a pick again lets it go: a decision can be left unanswered
+        if (again) delete ans[n]; else ans[n] = b.dataset.l;
+        own[n] = ''; $(`[data-own="${n}"]`, a).value = '';
+        $$(`.choice[data-n="${n}"]`, a).forEach(x => x.classList.toggle('on', !again && x === b));
+        save();
+      } else if (b.dataset.k === 'no' || b.dataset.k === 'ok') {
+        const text = b.dataset.k === 'no' ? '' : (v.Asks || []).map((q, n) => {
+          const words = (own[n] || '').trim();
+          if (words) return `${q.ID}: ${words}`;
+          const o = (q.Options || []).find(o => o.Label === ans[n]);
           return o ? `${q.ID}${o.Key}. ${q.Header}: ${o.Label}` : '';
         }).filter(Boolean).join('\n\n');
-        decided = v.ID; a.remove();
-        op(text ? {op: 'send', text} : {op: 'decisions_dismiss', id: v.ID});
+        $$('button', a).forEach(x => x.disabled = true);
+        if (await op(text ? {op: 'send', text} : {op: 'decisions_dismiss', id: v.ID})) {
+          decided = v.ID; keep({gone: v.ID});
+          if (decEl === a) decEl = null;
+          a.remove();
+        } else $$('button', a).forEach(x => x.disabled = false); // it didn't go: the card stays, as filled in
       }
     };
     return a;

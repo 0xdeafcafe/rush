@@ -95,3 +95,16 @@
 .say th{color:var(--color-bright);font-weight:var(--font-weight-semibold)}
 /* Safari on a phone zooms in on a focused field whose text is under 16px */
 @media (pointer:coarse){input,textarea,select,.field,.composer textarea{font-size:16px}}
+/* a decisions card: each decision's options one under another, what each means under its name */
+.ask .decision{border-top:1px solid var(--color-faint);padding-top:calc(var(--spacing)*2)}
+.ask .decision>*+*{margin-top:calc(var(--spacing)*1.5)}
+.ask .decision .why{color:var(--color-sub);font-size:13px;overflow-wrap:anywhere}
+.ask .decision .why pre{overflow-x:auto}
+.ask .choices-col{flex-direction:column;flex-wrap:nowrap}
+.ask .choices-col .choice{height:auto;min-height:calc(var(--spacing)*9);white-space:normal;text-align:left;align-items:flex-start;padding-block:calc(var(--spacing)*1.5);width:100%}
+.ask .choice-k{color:var(--color-dim);flex-shrink:0}
+.ask .choice-t{min-width:0;overflow-wrap:anywhere;color:var(--color-bright)}
+.ask .choice-t small{display:block;font-size:12px;color:var(--color-sub);font-weight:400}
+.ask .choice-pick{color:var(--color-yellow);font-size:12px;white-space:nowrap}
+.ask .choice.on .choice-k,.ask .choice.on .choice-t,.ask .choice.on .choice-t small,.ask .choice.on .choice-pick{color:var(--color-ground)}
+.ask .key:disabled{opacity:.5}
