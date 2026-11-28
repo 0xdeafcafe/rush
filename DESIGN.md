@@ -4405,6 +4405,14 @@ at):
   (`running::running_preview`, `jobs_block`, by `Ctx::whole`). A
   notice's link to the step that started its task says "enter · its
   step" on the row picked, not "↑ its step" on every one.
+- **Views put away are a word on the tab row.** A session with no view
+  now and some put away had a part of the column for them ("Views  3
+  put away · bring one back ›"), a panel with nothing in it. Where the
+  column has room they're "Views 3" after the tabs instead
+  (`views::beside::put_away`, `Side::views_away`, `views::head`), a
+  click there bringing their list up as the part's head did; the
+  "[ ] views" hint isn't said beside it. Views it has now, folded, are
+  still the column's last part, each with what it says of itself.
 
 ## Conversation views (Rust-only)
 

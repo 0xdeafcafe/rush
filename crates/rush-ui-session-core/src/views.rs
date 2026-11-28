@@ -64,6 +64,9 @@ pub struct ViewState {
     pub tabs: Vec<(usize, usize, usize)>,
     /// The context label on the name's row: from and width, in the pane.
     pub context: (usize, usize),
+    /// "Views 3" after the tabs, the views put away: from and to, cells
+    /// into the pane; (0, 0) when it isn't drawn.
+    pub views_chip: (usize, usize),
     /// The conversation's views dropdown under its tab, when open: the
     /// row picked in it (presets.rs).
     pub menu: Option<usize>,
@@ -344,8 +347,21 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         chips.spans.push(sp(" back to the list", DIM));
         chips.spans.push(plain(" "));
     }
+    // The views put away, when the session has none now: a word after
+    // the tabs that brings their list up, not a part of the column.
+    let away = conn(m, &key).side.views_away;
+    let mut views_chip = (0, 0);
+    if away > 0 && cur == 0 {
+        let chip = line([sp("  Views ", SUB), dim(away.to_string()), plain(" ")]);
+        if strip.width() + chip.width() <= hw.saturating_sub(chips.width() + 2) {
+            views_chip = (strip.width() + 1, strip.width() + chip.width());
+            join(&mut strip, chip);
+        }
+    }
+    // Not beside "Views 3", where "[ ] views" would read as its keys.
     let hint = line([sp("   [ ]", DIM), sp(" views", FAINT)]);
-    if strip.width() + hint.width() <= hw.saturating_sub(chips.width() + 2) {
+    if views_chip == (0, 0) && strip.width() + hint.width() <= hw.saturating_sub(chips.width() + 2)
+    {
         join(&mut strip, hint);
     }
     let sw = strip.width();
@@ -387,6 +403,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     }
     let c = conn(m, &key);
     c.vs.tabs = tabs;
+    c.vs.views_chip = views_chip;
     c.vs.context = at;
 }
 
@@ -867,6 +884,12 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
         }
         MouseKind::Down(Button::Left) => {
+            // "Views 3" after the tabs: the list of those put away.
+            let chip = conn(m, &key).vs.views_chip;
+            if Some(y) == tabs_y && chip.1 > chip.0 && x >= 2 + chip.0 && x < 2 + chip.1 {
+                rush_ui_plugin_ui::views::beside::open_from_side(m, &key, "");
+                return Out::Draw;
+            }
             let Some(i) = tab_at(m) else {
                 if name != "conversation" && y >= top && y < top + rows {
                     let r = conn(m, &key).vs.refs.get(y - top).cloned();

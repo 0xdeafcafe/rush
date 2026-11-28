@@ -682,3 +682,33 @@ fn the_box_leaves_the_columns_width_keys_to_the_help() {
     assert!(last.contains("f1 more  ·  esc back"), "{last:?}");
     assert!(!last.contains("the side's width"), "{last:?}");
 }
+
+/// With only views put away and room for the column, they aren't a part
+/// of it: the tab row counts them ("Views 1"), and a click there brings
+/// their list up.
+#[test]
+fn views_put_away_are_a_word_on_the_tab_row() {
+    let id = "vb-away-chip";
+    let mut m = rush_open(id, 220, 40, vec![view("prs", "Pull requests", "3 ready")]);
+    rush_host::views::drop_view(id, "prs").expect("put away");
+    assert_eq!(rush_host::views::past_views(id).len(), 1);
+    screen(&mut m);
+    let f = screen(&mut m);
+    let all = f.join("\n");
+    assert!(
+        !all.contains("put away") && !all.contains("bring one back"),
+        "{all}"
+    );
+    let y = f
+        .iter()
+        .position(|l| l.contains("Conversation ▾"))
+        .expect("the tab row");
+    assert!(f[y].contains("Changes   Views 1"), "{:?}", f[y]);
+    assert!(!f[y].contains("[ ] views"), "{:?}", f[y]);
+    let x = rush_core::text::width(&f[y][..f[y].find("Views 1").unwrap()]);
+    click(&mut m, x + 2, y);
+    assert!(
+        read::state_of(&m, KEY).is_some_and(|s| s.past),
+        "its list is up"
+    );
+}

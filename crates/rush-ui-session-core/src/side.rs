@@ -396,6 +396,9 @@ pub struct Side {
     pub w: usize,
     /// The most it could be at this width; 0 when it isn't showing.
     pub room: usize,
+    /// The views it has put away, when it has none now: said on the tab
+    /// row, not as a part here (views::beside::put_away).
+    pub views_away: usize,
     /// It has its room beside the conversation and nothing to say: no
     /// rows are drawn, and the conversation keeps to its own width all
     /// the same, so its rows don't move when a part comes or goes.
@@ -753,7 +756,9 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         part(&mut side, GREEN, rows, refs);
     }
 
-    // Folded views are the column's last part, not a strip of their own.
+    // Folded views are the column's last part, not a strip of their own;
+    // with only views put away, the tab row counts them.
+    side.views_away = rush_ui_plugin_ui::views::beside::put_away(m, key, w, sw);
     if let Some((edge, rows, refs)) =
         rush_ui_plugin_ui::views::beside::folded_in_side(m, key, w, sw)
     {

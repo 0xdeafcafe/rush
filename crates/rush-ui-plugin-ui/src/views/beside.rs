@@ -371,10 +371,25 @@ pub fn open_from_side(m: &mut Model, key: &str, rest: &str) {
     }
 }
 
+/// How many views the session has put away, when that's all it has and
+/// the column beside the conversation (sw wide) is where they'd be said:
+/// the tab row says them instead ("Views 3"), a click there bringing the
+/// list of them up. A part of the column saying "Views  3 put away ·
+/// bring one back ›" was a panel with nothing in it (Rust-only). 0 when
+/// it has a view now, none put away, or they show as a panel or a strip.
+pub fn put_away(m: &mut Model, key: &str, w: usize, sw: usize) -> usize {
+    let (side, past, vw) = views_beside(m, key, w);
+    if sw == 0 || vw != 0 || !side.is_empty() || !read::state(m, key).folded(&side) {
+        return 0;
+    }
+    past.len()
+}
+
 /// The session's views folded into the column beside the conversation,
 /// sw wide, when that's where they go: the column's last part, edged in
 /// the newest view's colour (paneDock's folded views). None when they
-/// show as a panel or a strip, or there are none.
+/// show as a panel or a strip, or there are none now (those put away
+/// are the tab row's: put_away).
 pub fn folded_in_side(
     m: &mut Model,
     key: &str,
@@ -386,7 +401,7 @@ pub fn folded_in_side(
     Vec<String>,
 )> {
     let (side, past, vw) = views_beside(m, key, w);
-    if sw == 0 || vw != 0 || side.is_empty() && past.is_empty() {
+    if sw == 0 || vw != 0 || side.is_empty() {
         return None;
     }
     if !read::state(m, key).folded(&side) {
