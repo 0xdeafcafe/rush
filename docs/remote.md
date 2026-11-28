@@ -93,15 +93,20 @@ server in front of those hosts. This is the simpler plan that replaced
   (`ui.Model.Follow`), showing and doing what you ask but leaving switching
   logins, sleep, orphans, tidying and notifications to it; with none, it
   leads, and a rush opened on the Mac later takes over.
-- **Web app** (`internal/remote/web`) is embedded plain HTML and JS, in
-  rush's own look (one monospace face, its colours from `internal/ui/style.go`,
-  dark and light). Its CSS is Tailwind, built from `webstyle/app.css` by
-  `go generate ./internal/remote` (which installs Tailwind 4 in a scratch
-  folder) and committed, so `go install` needs no Node. Routes are the hash
+- **Web app** (`crates/rush-remote/web`, listed in `web.rs`) is embedded
+  plain HTML, CSS and JS with no build step, in rush's own look (one
+  monospace face, its colours, dark and light, the system's or the one picked
+  in its settings): `md.js` (the theme, markdown), `session.js` (one
+  session) and `app.js` (the rest). Routes are the hash
   alone (`#/`, `#/s/<machine>/<id>`, `#/new`, `#/devices`); each screen is a
   scope whose streams and timers end when you leave it, and whose late
-  answers are dropped, so nothing draws over the screen you're on. Lists
-  update their rows in place. The session list comes from
+  answers are dropped, so nothing draws over the screen you're on. The list
+  of sessions is a scope of its own: beside every screen on a window 900px
+  wide or more, the `#/` screen on a narrower one. Lists
+  update their rows in place. A session's replay (its history at opening,
+  and again after any `reset`) is built off the page and swapped in once,
+  only when it differs from what's shown. serve's CSP allows no inline
+  style or script, so the app sets none. The session list comes from
   `GET /api/sessions/stream` (SSE: the list when it changes, a keepalive every
   15s, and first the browser's own device id); a peer without it is polled.
   It also serves a PWA manifest and a service worker.

@@ -1,18 +1,22 @@
 'use strict';
 // Rush's web app: your sessions on this machine (and its peers), from a
-// phone or a browser, in rush's own look. Plain JS, no build but the CSS
-// (webstyle/app.css).
+// phone or a browser, in rush's own look. Plain JS and CSS, no build:
+// md.js (the theme, markdown), session.js (one session), and this, the
+// rest, which starts it.
 //
 // Routes are the hash, and the hash alone says what's on screen: #/ the
 // sessions, #/s/<machine>/<id> one (…/all with its whole history), #/new,
-// #/devices. Each screen is a scope: leaving it ends its streams and
-// timers, and anything still in flight from it is dropped, so nothing
-// late ever draws over the screen you're on. Lists update rows in place.
+// #/devices (settings, and the devices paired). Each screen is a scope:
+// leaving it ends its streams and timers, and anything still in flight
+// from it is dropped, so nothing late ever draws over the screen you're
+// on. The list of sessions is a scope of its own: on a wide window it
+// stays beside every screen, on a narrow one it is the #/ screen and ends
+// when you leave it. Lists update rows in place.
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const el = html => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const enc = encodeURIComponent;
 
 let machines = [], machine = '', base = '', me = '', lastList = [];
 
@@ -20,11 +24,17 @@ let machines = [], machine = '', base = '', me = '', lastList = [];
 // (a send that was delivered but unanswered would be sent twice).
 const api = (p, o) => fetch(base + '/api' + p, o).then(async r => {
   if (r.status === 401) throw 401;
-  if (!r.ok) throw ((await r.json().catch(() => ({}))).error || r.statusText);
+  if (!r.ok) throw ((await r.json().catch(() => ({}))).error || r.statusText || 'HTTP ' + r.status);
   return r;
-});
+}, () => { throw "can't reach rush"; });
 const post = (p, b) => api(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)});
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// what this browser keeps: drafts, folds, the last folder
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('rush.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { v === undefined || v === '' ? localStorage.removeItem('rush.' + k) : localStorage.setItem('rush.' + k, JSON.stringify(v)); } catch {} },
+};
 
 // the rush bottle, as the header draws it, a pixel to a cell
 const bottle = (cls = 'bottle') => `<svg class="${cls}" viewBox="0 0 6 10" shape-rendering="crispEdges" aria-hidden="true">
@@ -33,8 +43,9 @@ const bottle = (cls = 'bottle') => `<svg class="${cls}" viewBox="0 0 6 10" shape
   <rect x="1" y="6" width="4" height="1" fill="#d61c18"/><rect y="8" width="6" height="1" fill="#9a4c14"/><rect y="9" width="6" height="1" fill="#542606"/></svg>`;
 
 // ── words ──
+const zero = t => !t || t.startsWith('0001');
 const ago = t => {
-  if (!t || t.startsWith('0001')) return '';
+  if (zero(t)) return '';
   const s = (Date.now() - new Date(t)) / 1000;
   if (s < 45) return 'now';
   if (s < 3600) return Math.round(s / 60) + 'm';
@@ -42,81 +53,125 @@ const ago = t => {
   if (s < 7 * 86400) return Math.round(s / 86400) + 'd';
   return new Date(t).toLocaleDateString([], {day: 'numeric', month: 'short'});
 };
+const clock = t => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+const day = t => new Date(t).toLocaleDateString([], {day: 'numeric', month: 'short'});
+// dur is seconds as rush says them: 42s, 3m 05s, 1h 04m
+const dur = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + 's' : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}m`; };
 const home = p => String(p || '').replace(/^\/(Users|home)\/[^/]+/, '~');
 const money = n => n ? '$' + n.toFixed(2) : '';
+const tokens = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n || 0);
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const agentName = k => ({'': 'Claude', claude: 'Claude', codex: 'Codex', gemini: 'Gemini', kimi: 'Kimi', antigravity: 'Antigravity'}[k || ''] || k);
 const stateOf = i => i.alive === false ? (i.sleeping ? 'asleep' : 'stopped') : (i.state || 'idle');
 const marks = {blocked: '●', working: '✻', starting: '✻', idle: '◆', asleep: '◇', stopped: '·'};
 const stateWords = (st, needs) => st === 'blocked' ? 'needs ' + (needs || 'you') : st;
 const state = (st, needs) => `<span class="st-${esc(st)}">${marks[st] || '·'} ${esc(stateWords(st, needs))}</span>`;
-// md is the little markdown agents write most: code blocks, code, bold
-const md = s => esc(s)
-  .replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, c) => `<pre>${c}</pre>`)
-  .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-  .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+// the project a folder is, and the worktree of it when it's one
+const project = cwd => {
+  const m = String(cwd || '').match(/^(.*?)\/\.claude\/worktrees\/([^/]+)/), p = (m ? m[1] : String(cwd || '')).replace(/\/+$/, '');
+  return {name: p.split('/').pop() || '/', tree: m ? m[2] : ''};
+};
+const fine = matchMedia('(pointer: fine)'), wideQ = matchMedia('(min-width: 900px)');
+const wide = () => wideQ.matches;
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const buzz = ms => { try { navigator.vibrate && navigator.userActivation?.hasBeenActive && navigator.vibrate(ms); } catch {} };
+const copy = async (text, what = 'copied') => {
+  try { await navigator.clipboard.writeText(text); toast(what); } catch { toast("This browser won't let the page copy.", 'bad'); }
+};
 
 // ── screens ──
-let scope = null;
-function newScope() {
-  if (scope) scope.end();
+function mkScope() {
   const ends = [];
   const s = {live: true, on: f => ends.push(f), end() { s.live = false; ends.splice(0).forEach(f => { try { f(); } catch {} }); }};
-  return scope = s;
+  return s;
 }
-function bar({title = 'rush', sub = '', back = false, actions = []}) {
-  $('#title').innerHTML = title;
-  $('#sub').innerHTML = sub;
-  $('#back').innerHTML = back ? '‹' : bottle();
-  $('#back').classList.toggle('key-plain', true);
-  $('#back').disabled = !back;
-  $('#actions').replaceChildren(...actions);
+let scope = null;
+// what the screen offers the keyboard and the palette: {keys: {c: fn}, acts: [{name, hint, run}]}
+let view = {keys: {}, acts: []};
+function newScope() {
+  if (scope) scope.end();
+  view = {keys: {}, acts: []};
+  return scope = mkScope();
 }
-const action = (id, words, onclick) => { const b = el(`<button class="key key-plain" id="${id}">${words}</button>`); b.onclick = onclick; return b; };
-$('#back').onclick = () => go('#/');
+let needs = 0, barTitle = 'Rush';
+const titled = () => { document.title = (needs ? `(${needs}) ` : '') + (barTitle && barTitle !== 'Rush' ? barTitle + ' · Rush' : 'Rush'); };
+function bar({title = 'Rush', sub = '', actions, plain} = {}) {
+  set($('#title'), '', title, true);
+  set($('#sub'), '', sub, true);
+  if (actions) $('#actions').replaceChildren(...actions);
+  barTitle = plain ?? $('#title').textContent; titled();
+}
+const action = (id, words, onclick, label) => { const b = el(`<button class="key key-plain" id="${id}"${label ? ` aria-label="${esc(label)}" title="${esc(label)}"` : ''}>${words}</button>`); b.onclick = onclick; return b; };
 const go = h => { if (location.hash === h) route(); else location.hash = h; };
+const sessionHash = (id, m = machine) => `#/s/${enc(m)}/${enc(id)}`;
+$('#back').onclick = () => go('#/');
 
 function route() {
   if (!machines.length) return;
-  const h = location.hash;
-  let m;
-  $('#main').style.paddingBottom = '';
-  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(\/all)?$/))) { setMachine(decodeURIComponent(m[1])); return sessionScreen(m[2], !!m[3]); }
-  if (h === '#/new') return newScreen();
-  if (h === '#/devices') return devicesScreen();
-  homeScreen();
+  const h = location.hash, app = $('#app'), was = machine;
+  let m, name = 'home';
+  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(\/all)?$/))) { name = 'session'; setMachine(decodeURIComponent(m[1])); }
+  else if (h === '#/new') name = 'new';
+  else if (h === '#/devices') name = 'devices';
+  app.dataset.route = name;
+  $$('#tabbar a').forEach(a => a.dataset.tab === name ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  $('#actions').replaceChildren();
+  syncList(was !== machine);
+  if (name === 'session') sessionScreen(decodeURIComponent(m[2]), !!m[3]);
+  else if (name === 'new') newScreen();
+  else if (name === 'devices') devicesScreen();
+  else homeScreen();
+  markCurrent();
 }
 addEventListener('hashchange', route);
+wideQ.addEventListener('change', () => machines.length && route());
 
 function setMachine(name) {
   const m = machines.find(x => x.name === name) || machines[0];
-  machine = m.name; base = m.self ? '' : '/m/' + encodeURIComponent(m.name);
+  machine = m.name; base = m.self ? '' : '/m/' + enc(m.name);
+}
+
+// the page is as tall as what's left above an on-screen keyboard
+if (window.visualViewport) {
+  const fit = () => { if (visualViewport.scale === 1) document.documentElement.style.setProperty('--vvh', visualViewport.height + 'px'); scrollTo(0, 0); };
+  visualViewport.addEventListener('resize', fit);
+  visualViewport.addEventListener('scroll', () => scrollTo(0, 0));
 }
 
 // ── toasts, sheets ──
-function toast(text, kind) {
-  const t = el(`<div class=toast data-kind="${kind || ''}" role=status>${esc(text)}</div>`);
+function toast(text, kind, act) {
+  const t = el(`<div class=toast data-kind="${kind || ''}" role=${kind === 'bad' ? 'alert' : 'status'}><span>${esc(text)}</span></div>`);
+  if (act) { const b = el(`<button>${esc(act.name)}</button>`); b.onclick = () => { t.remove(); act.run(); }; t.append(b); }
+  t.onclick = e => { if (!e.target.closest('button')) t.remove(); };
   $('#toasts').append(t);
-  setTimeout(() => t.remove(), kind === 'bad' ? 7000 : 3500);
+  setTimeout(() => t.remove(), kind === 'bad' ? 8000 : act ? 6000 : 3000);
+  return t;
 }
-function sheet(html, id) {
-  const d = el(`<dialog class=sheet${id ? ` id=${id}` : ''}><div class=sheet-body>${html}</div></dialog>`);
+function sheet(html, {title = '', big = false, sc = scope} = {}) {
+  const d = el(`<dialog class="sheet${big ? ' big' : ''}" aria-label="${esc(title)}"><div class=sheet-body>${
+    title ? `<div class=sheet-head><h2>${esc(title)}</h2><button class="key key-plain" data-close aria-label=Close>✕</button></div>` : ''}${html}</div></dialog>`);
   document.body.append(d);
   d.addEventListener('close', () => d.remove());
-  d.addEventListener('click', e => { if (e.target === d) d.close(); });
+  d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-close]')) d.close(); });
   d.showModal();
-  scope && scope.on(() => d.open && d.close());
+  sc && sc.on(() => d.open && d.close());
   return d;
 }
-function confirmSheet(title, text, ok, danger) {
+function confirmSheet(title, text, ok, danger, sc = scope) {
   return new Promise(res => {
-    const d = sheet(`<fieldset class=box><legend>${esc(title)}</legend><p class="text-sub py-1">${esc(text)}</p>
-      <div class="flex gap-1.5 justify-end pt-2"><button class=key id=cancel>cancel</button><button class="key ${danger ? 'key-bad' : 'key-on'}" id=ok>${esc(ok)}</button></div></fieldset>`);
+    const d = sheet(`<p class=c-sub>${esc(text)}</p><div class="line end"><button class=key data-close>cancel</button><button class="key ${danger ? 'key-bad' : 'key-on'}" id=ok>${esc(ok)}</button></div>`, {title, sc});
     let v = false;
     $('#ok', d).onclick = () => { v = true; d.close(); };
-    $('#cancel', d).onclick = () => d.close();
     d.addEventListener('close', () => res(v));
   });
 }
+// anything marked data-copy copies what it names, or the code beside it
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  const pre = b.dataset.copy ? null : $('pre', b.closest('.code'));
+  copy(b.dataset.copy || (pre ? pre.textContent : ''));
+});
 
 // keyed puts one element per item in box, in order, updating those it has
 // rather than drawing them again: what you're looking at stays put.
@@ -141,6 +196,8 @@ setInterval(() => $$('time[data-t]').forEach(t => { t.textContent = ago(t.datase
 
 // ── start ──
 async function start() {
+  $('#logo').innerHTML = bottle();
+  $('#palkey').textContent = mac ? '⌘K' : 'ctrl K';
   // opened from rush's pairing QR code: trade the one-time code for the sign-in
   const pair = location.hash.match(/^#pair=([\w-]+)$/);
   if (pair) {
@@ -152,161 +209,347 @@ async function start() {
   try {
     const r = await fetch('/api/machines');
     if (r.status === 401) throw 401;
+    if (!r.ok) throw r.statusText || 'HTTP ' + r.status;
     machines = await r.json();
-  } catch (e) { return e === 401 ? signIn() : offline(e); }
-  setMachine(machine || machines[0].name);
+  } catch (e) { return e === 401 ? signIn() : offline(e instanceof TypeError ? 'No answer from this machine. Is rush serve running, and are you on its network?' : e); }
+  setMachine(machine || store.get('machine') || machines[0].name);
   route();
 }
+function alone(html) {
+  newScope(); endList(); machines = [];
+  $('#app').dataset.route = 'signin';
+  $('#main').innerHTML = html;
+  needs = 0; barTitle = 'Rush'; titled();
+}
 function offline(e) {
-  newScope(); bar({});
-  $('#main').innerHTML = `<div class=empty><p class=text-red>can't reach rush</p><p>${esc(e)}</p><p><button class=key id=retry>try again</button></p></div>`;
+  alone(`<div class=empty>${bottle()}<h2 class=c-red>Can't reach rush</h2><p>${esc(e)}</p><p><button class="key key-on" id=retry>try again</button></p></div>`);
   $('#retry').onclick = start;
+  addEventListener('online', start, {once: true});
 }
 
 function signIn() {
-  newScope(); machines = []; bar({});
-  $('#main').innerHTML = `<div class="px-3 pt-10 pb-10 max-w-md mx-auto space-y-5">
-    <div class="flex items-center gap-3">${bottle('h-14 w-[34px]')}<div><b class="text-[18px]">rush</b><p class=text-dim>your agents, anywhere on your tailnet</p></div></div>
-    <fieldset class=box><legend>pair this device</legend><p class=text-sub>In rush on your Mac: <b>Settings › Remote › Pair a device</b>, then scan its code with this phone's camera.</p></fieldset>
-    <form id=signin><fieldset class="box space-y-2"><legend>or sign in with its token · <span class=text-dim>rush remote token</span></legend>
-      <input id=tok class=field type=password autocomplete=current-password placeholder="token">
-      <div class="flex justify-end"><button class="key key-on" id=go>sign in</button></div></fieldset></form></div>`;
+  alone(`<div class=signin>
+    <div class=signin-head>${bottle()}<div><b>rush</b><p class=c-dim>your agents, from anywhere on your tailnet</p></div></div>
+    <fieldset class=box><legend>pair this device</legend><p class=c-sub>In rush on the machine: <b>Settings › Remote › Pair a device</b>. Scan its code with a phone's camera, or type the code below.</p></fieldset>
+    <form id=signin><fieldset class=box><legend>pairing code, or the machine's token</legend>
+      <input id=tok class=field type=password autocomplete=current-password placeholder="K7QM-3XHP" aria-label="Pairing code or token" autocapitalize=characters autocorrect=off spellcheck=false>
+      <p class=note>The token is what <span class=c-text>rush remote token</span> prints there.</p>
+      <div class=err-line id=sierr role=alert></div>
+      <div class="line end"><label class="key key-plain"><input type=checkbox id=show> show</label><button class="key key-on" id=go>sign in</button></div></fieldset></form></div>`);
+  $('#show').onchange = e => { $('#tok').type = e.target.checked ? 'text' : 'password'; };
+  if (fine.matches) $('#tok').focus();
   $('#signin').onsubmit = async e => {
     e.preventDefault();
-    const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: $('#tok').value})}).catch(() => null);
-    if (r && r.ok) { history.replaceState(null, '', location.pathname + '#/'); start(); } else toast("That isn't this machine's token.", 'bad');
+    const v = $('#tok').value.trim(), b = $('#go');
+    if (!v) return $('#tok').focus();
+    // a pairing code is eight of its letters, with or without the dash
+    const code = /^[2-9A-HJ-NP-Z]{4}-?[2-9A-HJ-NP-Z]{4}$/i.test(v);
+    b.disabled = true; b.classList.add('busy'); $('#sierr').textContent = '';
+    const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(code ? {code: v.toUpperCase().replace(/^(.{4})-?/, '$1-')} : {token: v})}).catch(() => null);
+    if (r && r.ok) { history.replaceState(null, '', location.pathname + '#/'); return start(); }
+    b.disabled = false; b.classList.remove('busy');
+    $('#sierr').textContent = !r ? "Can't reach rush. Check you're on its network." : code ? 'That code has been used or has run out. Show a new one in rush.' : "That isn't this machine's token.";
+    $('#tok').select();
   };
 }
 const failed = e => e === 401 ? signIn() : toast(String(e), 'bad');
 
-// ── the sessions ──
+// ── the sessions: the list beside every screen, or the #/ screen ──
 const groups = [['blocked', 'Needs you'], ['working', 'Working'], ['idle', 'Idle'], ['asleep', 'Asleep'], ['stopped', 'Stopped']];
 const groupOf = st => st === 'starting' ? 'working' : groups.some(g => g[0] === st) ? st : 'idle';
-function homeScreen() {
-  const sc = newScope();
-  const acts = [];
-  if (machines.length > 1) {
-    const s = el(`<select id=mach class="key" aria-label=Machine>${machines.map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join('')}</select>`);
-    s.value = machine; s.onchange = () => { setMachine(s.value); homeScreen(); };
-    acts.push(s);
-  }
-  if ('PushManager' in window) acts.push(action('bell', 'notify', subscribe));
-  acts.push(action('devs', 'devices', () => go('#/devices')), action('new', '<span class=text-orange>+</span> new', () => go('#/new')));
-  bar({title: machines.length > 1 ? esc(machine) : 'rush', actions: acts});
-  $('#main').innerHTML = `<div id=list>${'<div class=row><div class="skeleton h-4 w-2/3 my-0.5"></div><div class="skeleton h-3 w-1/3 ml-[2ch] mt-1.5"></div></div>'.repeat(3)}</div><div id=oth></div>`;
-  const draw = l => {
-    if (!sc.live) return;
-    lastList = l;
-    const list = $('#list');
-    if (!l.length) { list.innerHTML = `<div class=empty><div class="flex justify-center">${bottle('h-12 w-[29px] opacity-60')}</div><p>no sessions yet</p><p class=text-faint>start one with + new, or carry one on from below</p></div>`; set($('#sub'), '', ''); return; }
-    if (!list.querySelector('[data-key]')) list.innerHTML = '';
-    const ss = l.map(i => ({...i, st: stateOf(i)}));
+let listSc = null, listFor = '';
+function endList() { if (listSc) { listSc.end(); listSc = null; } }
+function syncList(force) {
+  if (!wide() && $('#app').dataset.route !== 'home') return endList();
+  if (listSc && listSc.live && listFor === machine && !force) return;
+  endList();
+  listSc = mkScope(); listFor = machine;
+  listPane(listSc);
+}
+function markCurrent() {
+  const h = location.hash.replace(/\/all$/, '');
+  $$('#list .row-link').forEach(a => a.getAttribute('href') === h ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+}
+function listPane(sc) {
+  const list = $('#list'), q = $('#q');
+  store.set('machine', machine);
+  // the machines, when this one shows others
+  const tabs = $('#machs');
+  tabs.hidden = machines.length < 2;
+  tabs.innerHTML = machines.map(m => `<button class=key role=tab aria-selected=${m.name === machine} data-m="${esc(m.name)}">${esc(m.name)}</button>`).join('');
+  tabs.onclick = e => { const b = e.target.closest('[data-m]'); if (b && b.dataset.m !== machine) { setMachine(b.dataset.m); syncList(true); if ($('#app').dataset.route === 'home') homeScreen(); } };
+  list.innerHTML = '<div class=row-link><div class="skeleton"></div></div>'.repeat(5);
+  $('#oth').innerHTML = '';
+  $('#conn').hidden = true;
+
+  let all = null, oth = [], more = false, before = null;
+  const folded = new Set(store.get('fold', ['stopped', 'others']));
+  const draw = () => {
+    if (!sc.live || !all) return;
+    const words = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (...f) => words.every(w => f.some(x => String(x || '').toLowerCase().includes(w)));
+    const ss = all.map(i => ({...i, st: stateOf(i)}));
+    const shown = ss.filter(i => hit(i.name, i.cwd, agentName(i.kind), i.model, i.detail, i.st, i.id));
+    const projects = new Set(ss.map(i => project(i.cwd).name)).size > 1;
     const rows = [];
     for (const [g, name] of groups) {
-      const in_ = ss.filter(i => groupOf(i.st) === g).sort((a, b) => b.startedAt > a.startedAt ? 1 : -1);
+      const in_ = shown.filter(i => groupOf(i.st) === g).sort((a, b) => a.updatedAt < b.updatedAt ? 1 : -1);
       if (!in_.length) continue;
-      const cost = in_.reduce((n, i) => n + (i.costUsd || 0), 0);
-      rows.push({hdr: g, name, n: in_.length, cost}, ...in_);
+      const shut = folded.has(g) && !words.length;
+      rows.push({hdr: g, name, n: in_.length, cost: in_.reduce((n, i) => n + (i.costUsd || 0), 0), shut});
+      if (shut) continue;
+      if (!projects) { rows.push(...in_); continue; }
+      // by project, the one touched last first
+      const by = new Map();
+      for (const i of in_) { const p = project(i.cwd).name; by.has(p) || by.set(p, []); by.get(p).push(i); }
+      for (const [p, l] of by) rows.push({proj: p, g}, ...l);
     }
-    keyed(list, rows, i => i.hdr ? 'h:' + i.hdr : i.id,
-      i => i.hdr ? el('<div class=rule><b></b><span></span></div>')
-        : el(`<a class=row><div class=row-top><span class=mark></span><b></b><span class=cost></span><time></time></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></a>`),
-      (e, i) => {
-        if (i.hdr) { set(e, 'b', '▾ ' + i.name); set(e, 'span', `${i.n}${i.cost ? ' · ' + money(i.cost) : ''}`); return; }
-        e.href = `#/s/${encodeURIComponent(machine)}/${encodeURIComponent(i.id)}`;
-        e.dataset.id = i.id; e.dataset.state = i.st;
-        set(e, '.mark', marks[i.st] || '·');
-        set(e, 'b', i.name || i.id);
-        set(e, '.cost', money(i.costUsd));
-        const t = $('time', e); t.dataset.t = i.updatedAt; set(t, '', ago(i.updatedAt));
-        const where = `<span class=text-blue>${esc(home(i.cwd))}</span> <span class=text-faint>· ${esc([agentName(i.kind), i.model].filter(Boolean).join(' · '))}</span>`;
-        set(e, '.why', i.st === 'blocked' ? `<span class=text-yellow>${esc(stateWords(i.st, i.needs))}</span> <span class=text-faint>· ${esc(home(i.cwd))}</span>` : i.detail && i.st === 'working' ? `${esc(i.detail)}` : where, true);
-      });
+    if (!ss.length) list.innerHTML = `<div class=empty>${bottle()}<h2>No sessions on ${esc(machine)} yet</h2><p>Start an agent in a folder and it shows here, with what it's doing and what it needs from you.</p><p><a class="key key-on" href=#/new>start a session</a></p></div>`;
+    else if (!rows.length && !oth.some(o => hit(o.name, o.cwd, agentName(o.agent)))) list.innerHTML = `<div class=empty><p>Nothing matches “${esc(q.value.trim())}”.</p><p><button class=key id=unq>clear the search</button></p></div>`;
+    else {
+      if (!list.querySelector('[data-key]')) list.innerHTML = '';
+      keyed(list, rows, i => i.hdr ? 'h:' + i.hdr : i.proj ? `p:${i.g}:${i.proj}` : i.id,
+        i => i.hdr ? el('<button class=rule><b></b><span></span></button>') : i.proj ? el('<div class=proj></div>')
+          : el(`<div class=row><a class=row-link><div class=row-top><span class=mark aria-hidden=true></span><b></b><span class=cost></span><time></time></div><div class=row-sub><span class=tree aria-hidden=true>└</span><span class=why></span></div></a><div class=row-acts hidden><button class="key key-on" data-quick=allow>allow</button><button class="key key-bad" data-quick=deny>deny</button></div></div>`),
+        (e, i) => {
+          if (i.hdr) { e.dataset.hdr = i.hdr; e.setAttribute('aria-expanded', !i.shut); set(e, 'b', (i.shut ? '▸ ' : '▾ ') + i.name); set(e, 'span', `${i.n}${i.cost ? ' · ' + money(i.cost) : ''}`); return; }
+          if (i.proj) return set(e, '', i.proj);
+          const a = $('a', e);
+          a.setAttribute('href', sessionHash(i.id));
+          e.dataset.id = i.id; e.dataset.state = i.st;
+          set(e, '.mark', marks[i.st] || '·');
+          set(e, 'b', i.name || i.id);
+          set(e, '.cost', money(i.costUsd));
+          const t = $('time', e); t.dataset.t = i.updatedAt; set(t, '', ago(i.updatedAt));
+          const p = project(i.cwd), ask = (i.asking || [])[0];
+          const where = (projects ? (p.tree ? `<span class=c-green>${esc(p.tree)}</span> · ` : '') : `<span class=c-blue>${esc(home(i.cwd))}</span> · `) + `<span>${esc([agentName(i.kind), i.model].filter(Boolean).join(' · '))}</span>`;
+          const queued = (i.queue || []).length ? ` <span class=c-queue>⋯ ${i.queue.length} queued</span>` : '';
+          set(e, '.why', (i.st === 'blocked' ? `<span class=c-yellow>${esc(stateWords(i.st, i.needs))}</span>${ask ? ` <span>${esc(ask.call.split('\n')[0])}</span>` : ''}`
+            : i.error ? `<span class=c-red>${esc(i.error)}</span>`
+            : i.limit ? `<span class=c-yellow>usage limit · resets ${esc(clock(i.limit.resetsAt))}</span>`
+            : i.decisions ? `<span class=c-yellow>${esc(i.needs || 'decisions')}</span> ${where}`
+            : i.st === 'working' && i.detail ? `<span class=c-sub>${esc(i.detail)}</span>` : where) + queued, true);
+          a.setAttribute('aria-label', `${i.name || i.id}, ${stateWords(i.st, i.needs)}`);
+          // one approval waiting can be answered from here
+          const acts = $('.row-acts', e), one = i.st === 'blocked' && (i.asking || []).length === 1 && !(i.questions || []).length;
+          acts.hidden = !one;
+          if (one) acts.dataset.ask = ask.id;
+        });
+    }
+    markCurrent();
     const n = ss.filter(i => i.st === 'blocked').length, w = ss.filter(i => groupOf(i.st) === 'working').length;
-    set($('#sub'), '', [n && `<span class=text-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=text-orange>✻ ${w} working</span>`].filter(Boolean).join(' '), true);
+    set($('#sum'), '', [n && `<span class=c-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=c-orange>✻ ${w} working</span>`].filter(Boolean).join(' ') || `<span>${esc(machine)} · ${plural(ss.length, 'session')}</span>`, true);
+    needs = n; titled();
+    $('#tabn').hidden = !n; $('#tabn').textContent = n;
+    if (navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+    drawOthers(hit);
   };
+  const take = l => {
+    if (!sc.live) return;
+    // one that has just come to need you says so, wherever you are
+    if (before) for (const i of l) {
+      const st = stateOf(i);
+      if (st === 'blocked' && before.get(i.id) !== 'blocked' && location.hash.replace(/\/all$/, '') !== sessionHash(i.id)) {
+        toast(`● ${i.name || i.id} ${stateWords(st, i.needs)}`, 'ask', {name: 'open', run: () => go(sessionHash(i.id))});
+        buzz(60);
+      }
+    }
+    before = new Map(l.map(i => [i.id, stateOf(i)]));
+    all = lastList = l; draw();
+  };
+  q.oninput = draw;
+  q.onkeydown = e => {
+    if (e.key === 'Escape') { if (q.value) { q.value = ''; draw(); } else q.blur(); e.stopPropagation(); }
+    if (e.key === 'Enter' || e.key === 'ArrowDown') { const a = $('#list .row-link'); if (a) { e.preventDefault(); e.key === 'Enter' ? a.click() : a.focus(); } }
+  };
+  $('#listbox').onclick = async e => {
+    const h = e.target.closest('.rule');
+    if (h) { const g = h.dataset.hdr; folded.has(g) ? folded.delete(g) : folded.add(g); store.set('fold', [...folded]); return draw(); }
+    if (e.target.closest('#unq')) { q.value = ''; return draw(); }
+    if (e.target.closest('#more')) { more = true; return draw(); }
+    const k = e.target.closest('[data-quick]');
+    if (k) {
+      const row = k.closest('.row'), ask = k.parentNode.dataset.ask, allow = k.dataset.quick === 'allow';
+      $$('button', k.parentNode).forEach(b => b.disabled = true);
+      try { await post(`/sessions/${enc(row.dataset.id)}/op`, allow ? {op: 'allow', id: ask} : {op: 'deny', id: ask}); buzz(20); toast(allow ? 'allowed' : 'denied'); }
+      catch (err) { failed(err); }
+      $$('button', k.parentNode).forEach(b => b.disabled = false);
+      return;
+    }
+    const b = e.target.closest('[data-r]');
+    if (!b) return;
+    if (!b.dataset.r) return toast('It runs in a terminal there. It can be carried on in Rush once it ends.');
+    if (!await confirmSheet('Carry it on in Rush', `“${$('b', b).textContent}” carries on as a Rush session on ${machine}, with its own agent and folder.`, 'carry on', false, sc)) return;
+    try { const v = await (await post('/sessions', {resume: b.dataset.r})).json(); go(sessionHash(v.id)); }
+    catch (err) { failed(err); }
+  };
+
   // the list as serve streams it; a peer whose serve can't stream is asked every 4s
   let got = false, timer = 0;
-  const poll = () => api('/sessions').then(r => r.json()).then(draw, e => sc.live && e === 401 && signIn());
+  const lost = on => { const c = $('#conn'); c.hidden = !on; if (on) c.textContent = navigator.onLine === false ? 'You are offline. The list is as it was.' : `Lost ${machine}. Trying again…`; };
+  const poll = () => api('/sessions').then(r => r.json()).then(l => { lost(false); take(l); }, e => { if (!sc.live) return; e === 401 ? signIn() : lost(true); });
   const es = new EventSource(base + '/api/sessions/stream');
-  es.onmessage = m => { got = true; const v = JSON.parse(m.data); if (v.me) me = v.me; if (v.sessions) draw(v.sessions); };
-  es.onerror = () => { if (!got && !timer) { es.close(); poll(); timer = setInterval(poll, 4000); } };
-  sc.on(() => { es.close(); clearInterval(timer); });
+  es.onopen = () => lost(false);
+  es.onmessage = m => { got = true; lost(false); const v = JSON.parse(m.data); if (v.me) me = v.me; if (v.sessions) take(v.sessions); };
+  es.onerror = () => {
+    if (!sc.live) return;
+    if (!got && !timer) { es.close(); poll(); timer = setInterval(poll, 4000); }
+    else if (got) { lost(true); if (es.readyState === 2) api('/machines').catch(e => e === 401 && signIn()); }
+  };
+  sc.on(() => { es.close(); clearInterval(timer); q.oninput = null; });
 
   // the machine's other sessions, its agents' own that Rush didn't start: a
   // past one carries on in Rush when picked
-  let oth = [], all = false;
-  const others = () => api('/others').then(r => r.json()).then(v => { if (sc.live) { oth = v || []; drawOthers(); } }, () => {});
-  const drawOthers = () => {
-    const box = $('#oth');
-    if (!oth.length) { box.innerHTML = ''; return; }
-    if (!$('#othlist', box)) box.innerHTML = `<div class=rule><b>▾ Not started by Rush</b><span id=othn></span></div><div id=othlist></div><div id=othmore class="px-3 py-2"></div>`;
-    set($('#othn'), '', String(oth.length));
-    keyed($('#othlist'), all ? oth : oth.slice(0, 20), o => o.sessionId,
-      () => el(`<button class=row data-state=stopped><div class=row-top><span class=mark>·</span><b></b><time></time></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></button>`),
+  const others = () => api('/others').then(r => r.json()).then(v => { if (sc.live) { oth = v || []; draw(); } }, () => {});
+  const drawOthers = hit => {
+    const box = $('#oth'), l = oth.filter(o => hit(o.name, o.cwd, agentName(o.agent), o.account));
+    if (!l.length) { box.innerHTML = ''; return; }
+    const shut = folded.has('others') && !q.value.trim();
+    if (!$('#othlist', box)) box.innerHTML = `<button class=rule data-hdr=others><b></b><span id=othn></span></button><div id=othlist></div><div id=othmore class=row-link></div>`;
+    $('.rule', box).setAttribute('aria-expanded', !shut);
+    set(box, '.rule b', (shut ? '▸ ' : '▾ ') + 'Not started by Rush');
+    set($('#othn'), '', String(l.length));
+    keyed($('#othlist'), shut ? [] : more ? l : l.slice(0, 20), o => o.sessionId,
+      () => el(`<button class=row data-state=stopped><div class=row-link><div class=row-top><span class=mark aria-hidden=true>·</span><b></b><time></time></div><div class=row-sub><span class=tree aria-hidden=true>└</span><span class=why></span></div></div></button>`),
       (e, o) => {
         e.dataset.r = o.live ? '' : o.sessionId;
         set(e, 'b', o.name || o.sessionId);
         const t = $('time', e); t.dataset.t = o.updatedAt || ''; set(t, '', ago(o.updatedAt));
-        set(e, '.why', `<span class=text-blue>${esc(home(o.cwd))}</span> <span class=text-faint>· ${esc([agentName(o.agent), o.account].filter(Boolean).join(' · '))}${o.live ? ' · in a terminal' : ''}</span>`, true);
+        set(e, '.why', `<span class=c-blue>${esc(home(o.cwd))}</span> · <span>${esc([agentName(o.agent), o.account].filter(Boolean).join(' · '))}${o.live ? ' · in a terminal' : ''}</span>`, true);
       });
-    $('#othmore').innerHTML = !all && oth.length > 20 ? `<button class="key key-plain text-dim" id=more>↓ ${oth.length - 20} more</button>` : '';
+    const left = !shut && !more && l.length > 20;
+    $('#othmore').hidden = !left;
+    $('#othmore').innerHTML = left ? `<button class="key key-plain" id=more>↓ ${l.length - 20} more</button>` : '';
   };
   others();
   const ot = setInterval(others, 60e3);
   sc.on(() => clearInterval(ot));
-  $('#oth').onclick = async e => {
-    if (e.target.closest('#more')) { all = true; return drawOthers(); }
-    const b = e.target.closest('[data-r]');
-    if (!b) return;
-    if (!b.dataset.r) return toast('It runs in a terminal there; it can be carried on in Rush once it ends.');
-    if (!await confirmSheet('carry it on in rush', `${$('b', b).textContent} carries on as a Rush session on ${machine}, with its own agent and folder.`, 'carry on')) return;
-    try { const v = await (await post('/sessions', {resume: b.dataset.r})).json(); go(`#/s/${encodeURIComponent(machine)}/${v.id}`); }
-    catch (err) { failed(err); }
-  };
+}
+$('#sidenew').onclick = () => go('#/new');
+// moves through the list's rows: -1 up, 1 down
+function stepRow(d) {
+  const rows = $$('#list .row-link[href], #oth button.row'), at = rows.indexOf(document.activeElement);
+  const cur = at < 0 ? rows.findIndex(a => a.getAttribute('aria-current')) : at;
+  const to = rows[Math.max(0, Math.min(rows.length - 1, (cur < 0 && d < 0 ? rows.length : cur) + d))];
+  if (to) { to.focus(); to.scrollIntoView({block: 'nearest'}); }
+}
+// the session before or after the one on screen, as the list has them
+function stepSession(d) {
+  const rows = $$('#list .row-link[href]'), at = rows.findIndex(a => a.getAttribute('aria-current'));
+  const to = rows[at < 0 ? 0 : at + d];
+  if (to) go(to.getAttribute('href'));
+}
+
+// #/ on a wide window, where the list is beside it: what there is to do
+function homeScreen() {
+  newScope();
+  bar({title: 'Rush'});
+  $('#main').innerHTML = `<div class=welcome>${bottle()}<p>Pick a session, or start one.</p>
+    <dl class=keys-list><dt><kbd>${mac ? '⌘' : 'ctrl'} K</kbd></dt><dd>go to anything</dd><dt><kbd>/</kbd></dt><dd>search the sessions</dd><dt><kbd>n</kbd></dt><dd>a new session</dd><dt><kbd>?</kbd></dt><dd>every shortcut</dd></dl></div>`;
 }
 
 // ── a new session ──
-function newScreen() {
-  newScope();
-  bar({title: 'new session', sub: 'on ' + esc(machine), back: true});
-  const dirs = [...new Set(lastList.map(i => i.cwd).filter(Boolean))].slice(0, 20);
-  $('#main').innerHTML = `<form id=mkform class="p-3 space-y-3">
-    <fieldset class=box><legend>folder on ${esc(machine)}</legend><input id=cwd class=field list=dirs placeholder="~/src/project" autocapitalize=off autocorrect=off spellcheck=false>
-      <datalist id=dirs>${dirs.map(d => `<option value="${esc(d)}">`).join('')}</datalist></fieldset>
-    <fieldset class=box><legend>agent</legend><input id=ag class=field list=ags placeholder="its default" autocapitalize=off>
-      <datalist id=ags>${['claude', 'codex', 'gemini', 'kimi'].map(a => `<option value="${a}">`).join('')}</datalist></fieldset>
-    <fieldset class=box><legend>first message</legend><textarea id=pr class="field min-h-32" rows=5 placeholder="what should it do?"></textarea></fieldset>
-    <div class="flex justify-end"><button class="key key-on" id=mk>start</button></div></form>`;
+const AGENTS = ['', 'claude', 'codex', 'gemini', 'kimi'];
+let newIn = '';
+function newScreen(again) {
+  const sc = newScope();
+  bar({title: 'New session', sub: `<span>on ${esc(machine)}</span>`});
+  const dirs = [...new Set([newIn, store.get('cwd.' + machine), ...lastList.slice().sort((a, b) => a.updatedAt < b.updatedAt ? 1 : -1).map(i => i.cwd)].filter(Boolean))].slice(0, 8);
+  $('#main').innerHTML = `<form id=mkform class=page>
+    <fieldset class=box><legend>folder on ${esc(machine)}</legend>
+      <input id=cwd class=field placeholder="~/src/project" aria-label=Folder autocapitalize=off autocorrect=off spellcheck=false value="${esc(home(dirs[0] || ''))}" required>
+      ${dirs.length ? `<div class=seg id=dirs aria-label="Recent folders">${dirs.map(d => `<button type=button class=key data-d="${esc(home(d))}">${esc(project(d).name)}${project(d).tree ? ` <span class=c-green>${esc(project(d).tree)}</span>` : ''}</button>`).join('')}</div>` : ''}</fieldset>
+    <fieldset class=box><legend>agent</legend><div class=seg id=ags role=radiogroup aria-label=Agent>${AGENTS.map((a, n) => `<button type=button class=key role=radio aria-checked=${!n} data-a="${a}">${a ? agentName(a) : 'the default'}</button>`).join('')}</div></fieldset>
+    <fieldset class=box><legend>first message</legend><textarea id=pr class=field rows=5 placeholder="What should it do?" aria-label="First message"></textarea></fieldset>
+    <details><summary class="key key-plain">▸ name, model and effort</summary><div class=box>
+      <input id=nm class=field placeholder="a name (it names itself otherwise)" aria-label=Name>
+      <input id=mdl class=field placeholder="model (the agent's default)" aria-label=Model autocapitalize=off autocorrect=off spellcheck=false>
+      <input id=eff class=field placeholder="effort (the agent's default)" aria-label=Effort autocapitalize=off autocorrect=off spellcheck=false></div></details>
+    <div class=err-line id=mkerr role=alert></div>
+    <div class="line end"><span class="note grow">${fine.matches ? `${mac ? '⌘' : 'ctrl'} enter starts it` : ''}</span><a class=key href=#/>cancel</a><button class="key key-on" id=mk>start</button></div></form>`;
+  // opened straight onto this screen, the folders aren't known yet
+  if (!lastList.length && !again) api('/sessions').then(r => r.json()).then(l => { if (sc.live && l.length && !$('#pr').value && !$('#cwd').value) { lastList = l; newScreen(true); } }, () => {});
+  let agent = '';
+  $('#ags').onclick = e => { const b = e.target.closest('[data-a]'); if (!b) return; agent = b.dataset.a; $$('#ags button').forEach(x => x.setAttribute('aria-checked', x === b)); };
+  if ($('#dirs')) $('#dirs').onclick = e => { const b = e.target.closest('[data-d]'); if (b) { $('#cwd').value = b.dataset.d; $('#pr').focus(); } };
+  if (fine.matches) (dirs.length ? $('#pr') : $('#cwd')).focus();
+  $('#mkform').onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('#mkform').requestSubmit(); } };
   $('#mkform').onsubmit = async e => {
     e.preventDefault();
-    $('#mk').disabled = true;
-    try { const v = await (await post('/sessions', {cwd: $('#cwd').value, agent: $('#ag').value, prompt: $('#pr').value})).json(); go(`#/s/${encodeURIComponent(machine)}/${v.id}`); }
-    catch (err) { failed(err); $('#mk').disabled = false; }
+    const b = $('#mk'), cwd = $('#cwd').value.trim();
+    b.disabled = true; b.classList.add('busy'); $('#mkerr').textContent = '';
+    try {
+      const v = await (await post('/sessions', {cwd, agent, prompt: $('#pr').value, name: $('#nm').value.trim(), model: $('#mdl').value.trim(), effort: $('#eff').value.trim()})).json();
+      store.set('cwd.' + machine, v.cwd || cwd); newIn = '';
+      go(sessionHash(v.id));
+    } catch (err) {
+      if (err === 401) return signIn();
+      b.disabled = false; b.classList.remove('busy');
+      $('#mkerr').textContent = String(err);
+    }
   };
 }
 
-// ── devices ──
+// ── settings, and the devices paired ──
+function setTheme(t) {
+  try { t ? localStorage.setItem('rush.theme', t) : localStorage.removeItem('rush.theme'); } catch {}
+  t ? document.documentElement.dataset.theme = t : delete document.documentElement.dataset.theme;
+  themeColor();
+}
+const themeNow = () => document.documentElement.dataset.theme || '';
+// the browser's own chrome takes the page's ground
+function themeColor() { const g = getComputedStyle(document.documentElement).getPropertyValue('--ground').trim().split(/\s+/); $('meta[name=theme-color]').content = `rgb(${g.join(',')})`; }
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', themeColor);
+let installer = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installer = e; });
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
 function devicesScreen() {
   const sc = newScope();
-  bar({title: 'devices', sub: 'paired with ' + esc(machine), back: true});
-  $('#main').innerHTML = `<div class=rule><b>▾ Paired</b><span id=devn></span></div><div id=devlist></div>
-    <p class="px-3 py-3 text-dim">Pair another in rush on that machine: Settings › Remote › Pair a device. A phone scans its code; an SSH app types it when asked.</p>
-    <div class="px-3 pb-10"><button class="key key-bad" id=signout>sign out of this device</button></div>`;
+  bar({title: 'Settings', sub: `<span>this device, and ${esc(machine)}</span>`});
+  const ios = /iPhone|iPad/.test(navigator.userAgent);
+  $('#main').innerHTML = `<div class=page>
+    <fieldset class=box><legend>appearance</legend><div class=seg id=theme role=radiogroup aria-label=Theme>${[['', 'as the system'], ['dark', 'dark'], ['light', 'light']].map(([v, w]) => `<button class=key role=radio aria-checked=${themeNow() === v} data-th="${v}">${w}</button>`).join('')}</div></fieldset>
+    <fieldset class=box><legend>notifications</legend><p class=c-sub id=pushsay>…</p><div class=line><button class=key id=pushon hidden>turn them on</button></div></fieldset>
+    ${standalone() ? '' : `<fieldset class=box><legend>on your home screen</legend><p class=c-sub>${ios ? 'In Safari: Share, then <b>Add to Home Screen</b>. Rush opens full screen from there, and can notify you.' : 'Rush installs as an app of its own, with no browser around it: Install, or Add to Home screen, in the browser\'s menu.'}</p>${ios ? '' : '<div class=line><button class=key id=install hidden>install rush</button></div>'}</fieldset>`}
+    <fieldset class=box><legend>devices paired with ${esc(machine)} <span id=devn></span></legend><div id=devlist><div class=skeleton></div></div>
+      <div class=line><button class=key id=pairnew><span class=c-orange>+</span> pair another device</button></div></fieldset>
+    <fieldset class=box><legend>this device</legend><div class=line><button class="key key-bad" id=signout>sign out</button><button class="key wide-only" id=keys2>keyboard shortcuts</button></div></fieldset></div>`;
+  $('#theme').onclick = e => { const b = e.target.closest('[data-th]'); if (!b) return; setTheme(b.dataset.th); $$('#theme button').forEach(x => x.setAttribute('aria-checked', x === b)); };
+  $('#keys2').onclick = shortcuts;
+  if ($('#install') && installer) { $('#install').hidden = false; $('#install').onclick = async () => { installer.prompt(); await installer.userChoice; installer = null; $('#install').hidden = true; }; }
+
+  // notifications: what stands between you and them, said plainly
+  const push = async () => {
+    const say = $('#pushsay'), on = $('#pushon');
+    if (!sc.live) return;
+    on.hidden = true;
+    if (!('PushManager' in window) || !('Notification' in window)) return say.textContent = ios && !standalone() ? 'Add Rush to your Home Screen first; iOS notifies only from there.' : "This browser can't show notifications.";
+    if (Notification.permission === 'denied') return say.textContent = "They're blocked for this site in the browser's settings.";
+    const reg = await navigator.serviceWorker.getRegistration(), sub = reg && await reg.pushManager.getSubscription();
+    if (!sc.live) return;
+    if (sub && Notification.permission === 'granted') { say.innerHTML = '<span class=c-green>● on</span> for this device: when an agent needs an approval or an answer, or fails.'; on.hidden = false; on.textContent = 'send them here again'; }
+    else { say.textContent = 'Off. Rush can tell you when an agent needs an approval or an answer, or fails.'; on.hidden = false; on.textContent = 'turn them on'; }
+  };
+  $('#pushon').onclick = async () => { await subscribe(); push(); };
+  push();
+
   const load = () => api('/devices').then(r => r.json()).then(l => {
     if (!sc.live) return;
+    l = l || [];
     const box = $('#devlist');
+    if (!box.querySelector('[data-key]')) box.innerHTML = '';
     set($('#devn'), '', String(l.length));
     keyed(box, l, d => d.id,
-      d => el(`<div class=row><div class=row-top><span class="mark text-dim">${d.kind === 'ssh' ? '❯' : '◰'}</span><b></b><span class=me></span><button class="key key-plain key-bad h-6" data-revoke>unpair</button></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></div>`),
+      d => el(`<div class=row data-state=${d.live ? 'idle' : 'stopped'}><div class=row-link><div class=row-top><span class=mark aria-hidden=true>${d.kind === 'ssh' ? '❯' : '◰'}</span><b></b><span class=me></span><button class="key key-plain key-bad" data-revoke>unpair</button></div><div class=row-sub><span class=tree aria-hidden=true>└</span><span class=why></span></div></div></div>`),
       (e, d) => {
         set(e, 'b', d.name);
-        set(e, '.me', d.id === me ? '<span class=text-orange>this device</span>' : '', true);
-        set(e, '.why', (d.live ? '<span class=text-green>● connected</span>' : `<span>seen ${esc(ago(d.lastSeen) || 'never')}${['now', ''].includes(ago(d.lastSeen)) ? '' : ' ago'}</span>`) +
-          ` <span class=text-faint>· ${d.kind === 'ssh' ? 'SSH key' : 'browser'} · paired ${esc(new Date(d.created).toLocaleDateString([], {day: 'numeric', month: 'short'}))}</span>`, true);
+        set(e, '.me', d.id === me ? '<span class=c-orange>this device</span>' : '', true);
+        set(e, '.why', (d.live ? '<span class=c-green>● connected</span>' : `<span>seen ${esc(ago(d.lastSeen) || 'never')}${['now', ''].includes(ago(d.lastSeen)) ? '' : ' ago'}</span>`) +
+          ` · <span>${d.kind === 'ssh' ? 'SSH key' : 'browser'} · paired ${esc(day(d.created))}</span>`, true);
         $('[data-revoke]', e).dataset.revoke = d.id;
       });
-  }, e => sc.live && failed(e));
+  }, e => { if (sc.live) e === 401 ? signIn() : $('#devlist').innerHTML = `<div class=err-line>${esc(e)}</div>`; });
   load();
   const t = setInterval(load, 10e3);
   sc.on(() => clearInterval(t));
@@ -314,347 +557,100 @@ function devicesScreen() {
     const b = e.target.closest('[data-revoke]');
     if (!b) return;
     const name = $('b', b.closest('.row')).textContent, self = b.dataset.revoke === me;
-    if (!await confirmSheet('unpair ' + name, self ? 'This device is signed out at once.' : 'It is signed out at once, and anything it has open ends.', 'unpair', true)) return;
-    try { await post(`/devices/${encodeURIComponent(b.dataset.revoke)}/revoke`, {}); if (self) return location.replace(location.pathname); load(); toast('unpaired ' + name); }
+    if (!await confirmSheet('Unpair ' + name, self ? 'This device is signed out at once.' : 'It is signed out at once, and anything it has open ends.', 'unpair', true)) return;
+    try { await post(`/devices/${enc(b.dataset.revoke)}/revoke`, {}); if (self) return location.replace(location.pathname); load(); toast('unpaired ' + name); }
     catch (err) { failed(err); }
   };
+  // a code for another device, as rush's own Pair a device shows one
+  $('#pairnew').onclick = async () => {
+    let p;
+    try { p = await (await post('/pair', {})).json(); } catch (err) { return failed(err); }
+    const d = sheet(`<p class=c-sub>Type this on the other device's sign-in${p.url ? ', or open the link there' : ''}. It works once${zero(p.expires) ? '' : `, until ${esc(clock(p.expires))}`}.</p>
+      <div class=pair-code>${esc(p.code)}</div>
+      ${p.url ? `<div class=line><span class="grow cut c-blue">${esc(p.url)}</span></div>` : ''}
+      <div class="line end"><button class=key data-copy="${esc(p.code)}">copy the code</button>${p.url ? `<button class=key data-copy="${esc(p.url)}">copy the link</button>${navigator.share ? '<button class="key key-on" id=share>share</button>' : ''}` : ''}</div>
+      ${p.ssh ? `<fieldset class=box><legend>or over SSH</legend><div class=code><div class=code-head><span>sh</span><button type=button data-copy>copy</button></div><pre>${esc(p.ssh)}</pre></div>${p.hostKey ? `<p class=note>host key ${esc(p.hostKey)}</p>` : ''}</fieldset>` : ''}`, {title: 'Pair another device'});
+    if ($('#share', d)) $('#share', d).onclick = () => navigator.share({title: 'Rush', url: p.url}).catch(() => {});
+    d.addEventListener('close', load);
+  };
   $('#signout').onclick = async () => {
-    if (!await confirmSheet('sign out', "You'll need a new pairing code, or the token, to sign in again.", 'sign out', true)) return;
-    if (me) await post(`/devices/${encodeURIComponent(me)}/revoke`, {}).catch(() => {});
+    if (!await confirmSheet('Sign out', "You'll need a new pairing code, or the token, to sign in again.", 'sign out', true)) return;
+    if (me) await post(`/devices/${enc(me)}/revoke`, {}).catch(() => {});
     await fetch('/api/logout', {method: 'POST'}).catch(() => {});
     location.replace(location.pathname); // the app afresh, from its start: the sign-in
   };
 }
 
-// ── one session ──
-const glyphs = {Bash: '$', Edit: '✎', MultiEdit: '✎', Write: '✎', Read: '◧', Grep: '⌕', Glob: '⌕', WebFetch: '⊕', WebSearch: '⊕', Task: '⇉', Agent: '⇉', TodoWrite: '☐'};
-function sessionScreen(id, full) {
-  const sc = newScope();
-  let info = lastList.find(i => i.id === id) || {};
-  const head = () => {
-    const st = stateOf({...info, alive: info.alive ?? true});
-    bar({title: `${esc(info.name || id)}`, sub: `${state(st, info.needs)}<span class="truncate text-dim">${esc(home(info.cwd))}${info.model ? ' · ' + esc(info.model) : ''}</span>`,
-      back: true, actions: [action('info', 'details', () => details())]});
-    const lg = $('#composer legend');
-    if (lg) lg.innerHTML = `to <b>${esc(info.name || id)}</b>${st === 'working' ? ' · <em>working</em>, send queues, steer goes in now' : ''}`;
-  };
-  $('#main').innerHTML = `<div id=log class="pt-1"></div><div id=asks></div>
-    <div class=composer id=composer><div id=pics class=chips></div>
-      <fieldset class=box><legend></legend><span class=prompt>❯</span><textarea id=txt rows=1 placeholder="message for this agent" enterkeyhint=send></textarea><button class="key key-on h-7" id=send>send</button></fieldset>
-      <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
-        <button id=steer title="into the turn under way"><b>steer</b></button><span class=sep>·</span><button id=halt class=text-red>stop</button><span class=sep>·</span><button id=chg><b>changes</b></button></div></div>`;
-  head();
-  // the conversation stays clear of the box, whatever its height
-  const ro = new ResizeObserver(() => { $('#main').style.paddingBottom = $('#composer').offsetHeight + 8 + 'px'; });
-  ro.observe($('#composer'));
-  sc.on(() => ro.disconnect());
-
-  const log = $('#log'), asks = new Map(), tasks = new Map();
-  let calls = new Map(), stick = !full, live = null, plan = null;
-  // into is where events draw: the log, or while a replay comes in (re), the
-  // log's next self, off the page. A replay is hundreds of events at once,
-  // at opening and whenever serve sends the conversation again; drawn
-  // straight onto the page each would move it. It's swapped in whole once
-  // the stream goes quiet, and only if it differs from what's shown.
-  let into = log, re = null;
-  log.innerHTML = '<div class="px-3 py-2"><div class="skeleton h-4 w-2/3 my-0.5"></div><div class="skeleton h-3 w-1/3 mt-1.5"></div></div>';
-  const op = o => post(`/sessions/${encodeURIComponent(id)}/op`, o).then(() => true, e => { failed(e); return false; });
-
-  // say sends the draft once. It stays in the box until the server has taken
-  // it (serve handed it to the session, not that the agent has read it: the
-  // conversation shows that), and a failed or unanswered request keeps it,
-  // to be sent again by hand. Typing meanwhile is kept.
-  let sending = false, pics = [];
-  const box = $('#txt');
-  const grow = () => { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 160) + 'px'; };
-  box.oninput = grow;
-  box.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); say(false); } };
-  const drawPics = () => {
-    $('#pics').innerHTML = pics.map((p, i) => `<span class=chip><img src="data:${p.type};base64,${p.data}" alt=""><button data-i=${i} aria-label=Remove>×</button></span>`).join('');
-  };
-  $('#pics').onclick = e => { const i = e.target.dataset.i; if (i !== undefined && !sending) { pics.splice(+i, 1); drawPics(); } };
-  const addFiles = async files => {
-    for (const f of files) {
-      if (!f.type.startsWith('image/')) continue;
-      try { pics.push(await picture(f)); } catch (e) { toast(`${f.name || 'image'}: ${e}`, 'bad'); }
-    }
-    drawPics();
-  };
-  $('#pic').onclick = () => $('#file').click();
-  $('#file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
-  box.onpaste = e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } };
-  const say = async guide => {
-    const sent = box.value, t = sent.trim(), att = pics.slice();
-    if ((!t && !att.length) || sending) return;
-    sending = true; $$('#send,#steer').forEach(b => b.disabled = true);
-    try {
-      await post(`/sessions/${encodeURIComponent(id)}/op`, {op: 'send', text: t, guide, pictures: att.length ? att : undefined});
-      pics = pics.filter(p => !att.includes(p)); drawPics();
-      box.value = box.value === sent ? '' : box.value.startsWith(sent) ? box.value.slice(sent.length).trimStart() : box.value;
-      grow(); stick = true; down();
-    } catch (e) {
-      if (e === 401) return signIn();
-      toast(`Not confirmed: ${e}. Your message is still in the box. It may have been delivered; check the conversation before sending again.`, 'bad');
-    } finally {
-      sending = false; $$('#send,#steer').forEach(b => b.disabled = false);
-    }
-  };
-  $('#send').onclick = () => say(false);
-  $('#steer').onclick = () => say(true);
-  $('#halt').onclick = () => op({op: 'interrupt'});
-
-  // changes: git's diff of the working folder against HEAD, and what's untracked, read on its machine
-  $('#chg').onclick = async () => {
-    const git = async args => {
-      const r = await (await post('/git', {cwd: info.cwd, args})).json();
-      return new TextDecoder().decode(Uint8Array.from(atob(r.out || ''), c => c.charCodeAt(0))) + (r.error ? '\n' + r.error : '');
-    };
-    const d = sheet(`<fieldset class=box><legend>changes · <span class=text-blue>${esc(home(info.cwd))}</span></legend><div id=chgbody><div class="skeleton h-40"></div></div></fieldset>`, 'changes');
-    try {
-      const [df, u] = await Promise.all([git(['diff', 'HEAD', '--no-color', '--no-ext-diff']), git(['ls-files', '--others', '--exclude-standard', '--full-name', '--', ':/'])]);
-      const lines = df.split('\n').map(l => `<span class="${l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('@@') || l.startsWith('diff ') ? 'hunk' : ''}">${esc(l)}</span>`).join('\n');
-      $('#chgbody', d).innerHTML = (u.trim() ? `<p class="text-dim pb-1">untracked: ${esc(u.trim().split('\n').join(', '))}</p>` : '') + `<pre>${df.trim() ? lines : 'no changes against HEAD'}</pre>`;
-    } catch (e) { $('#chgbody', d).innerHTML = `<div class=err-line>${esc(e)}</div>`; }
-  };
-
-  // down keeps the end in view, once a frame however much arrived in it
-  let downs = false;
-  const bottom = () => scrollTo({top: document.body.scrollHeight, behavior: 'instant'});
-  const down = () => {
-    if (!stick || re || downs) return;
-    downs = true;
-    requestAnimationFrame(() => { downs = false; if (sc.live && stick && !re) bottom(); });
-  };
-  const onScroll = () => { if (!re) stick = innerHeight + scrollY >= document.body.scrollHeight - 120; };
-  addEventListener('scroll', onScroll, {passive: true});
-  sc.on(() => removeEventListener('scroll', onScroll));
-  const add = h => { const e = el(h); into.append(e); down(); return e; };
-  const replay = () => {
-    if (re) clearTimeout(re.t);
-    else re = {calls, plan, live, stick, y: scrollY, at: Date.now()};
-    into = document.createElement('div');
-    calls = new Map(); plan = null; live = null; tasks.clear();
-    asks.forEach(a => { a.dataset.stale = ''; }); // one the replay brings again stays as it is
-  };
-  const settle = () => {
-    const was = re;
-    clearTimeout(was.t); re = null;
-    if (!sc.live) return;
-    // a step you opened stays open
-    const open = new Set($$('details[open][data-id]', log).map(d => d.dataset.id));
-    $$('details[data-id]', into).forEach(d => { if (open.has(d.dataset.id)) d.open = true; });
-    if (into.innerHTML === log.innerHTML) { calls = was.calls; plan = was.plan; live = was.live; }
-    else log.replaceChildren(...into.childNodes);
-    into = log;
-    asks.forEach((a, k) => { if ('stale' in a.dataset) { a.remove(); asks.delete(k); } });
-    stick = was.stick;
-    if (stick) bottom(); else scrollTo({top: was.y, behavior: 'instant'});
-  };
-
-  const diff = ed => `<pre>${ed.Old ? ed.Old.split('\n').map(x => `<span class=del>- ${esc(x)}</span>`).join('\n') + '\n' : ''}${(ed.New || '').split('\n').map(x => `<span class=add>+ ${esc(x)}</span>`).join('\n')}</pre>`;
-  const callBody = c => {
-    const i = c.Input || {};
-    if (i.Edits && i.Edits.length) return i.Edits.map(e => `<div class=text-blue>${esc(home(e.Path || i.Path))}</div>${diff(e)}`).join('');
-    if (i.Content) return `<div class=text-blue>${esc(home(i.Path))}</div><pre>${esc(i.Content.slice(0, 4000))}</pre>`;
-    if (i.Command) return `<pre>${esc(i.Command)}</pre>`;
-    return '';
-  };
-  const callWhat = c => { const i = c.Input || {}; return i.Description || home(i.Path) || i.Pattern || (i.Command || '').split('\n')[0] || ''; };
-  const callMore = c => { const i = c.Input || {}; return i.Description ? (i.Command || '').split('\n')[0] : ''; };
-  const callEl = c => el(`<details class=step data-id="${esc(c.ID)}"><summary><span class=run>✻</span><span class=glyph>${glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
-  const finish = (c, bad) => { const m = $('summary > span', c); m.className = 'ok'; m.textContent = bad ? '✗' : '✓'; if (bad) c.dataset.err = ''; };
-
-  const askEl = (t, v) => {
-    const a = document.createElement('div'); a.className = 'ask';
-    if (t === 'approval') {
-      a.innerHTML = `<h3>allow ${esc(v.Call.Name)}?</h3>${v.Reason ? `<p class=text-sub>${esc(v.Reason)}</p>` : ''}${callBody(v.Call) || `<p class=text-sub>${esc(callWhat(v.Call))}</p>`}
-        <div class=actions><button class="key key-on" data-k=a>allow</button><button class=key data-k=al>always</button><button class="key key-bad" data-k=d>deny</button></div>`;
-      a.onclick = ev => { const k = ev.target.closest('[data-k]')?.dataset.k; if (k) op(k === 'd' ? {op: 'deny', id: v.ID} : {op: 'allow', id: v.ID, always: k === 'al'}); };
-    } else {
-      const ans = {};
-      a.innerHTML = `<h3>${esc(v.Title || 'question')}</h3>` + (v.Asks || []).map((q, n) => `<div class=space-y-1.5><p class=text-text>${esc(q.Text)}</p><div class=choices>${(q.Options || []).map(o =>
-        `<button class="key choice" data-n="${n}" data-l="${esc(o.Label)}" title="${esc(o.Description)}">${esc(o.Label)}</button>`).join('')}</div></div>`).join('') +
-        '<div class=actions><button class="key key-on" data-k=ok>answer</button></div>';
-      a.onclick = ev => {
-        const b = ev.target.closest('button');
-        if (!b) return;
-        if (b.dataset.l) {
-          const q = v.Asks[b.dataset.n];
-          ans[q.Text] = q.Multi && ans[q.Text] ? ans[q.Text] + ', ' + b.dataset.l : b.dataset.l;
-          if (!q.Multi) $$('button', b.parentNode).forEach(x => x.classList.remove('on'));
-          b.classList.add('on');
-        } else if (b.dataset.k === 'ok') {
-          // the input AskUserQuestion takes: the questions, and answers by question text
-          const input = {title: v.Title || undefined, answers: ans, questions: (v.Asks || []).map(q => ({question: q.Text, header: q.Header, multiSelect: !!q.Multi,
-            options: (q.Options || []).map(o => ({label: o.Label, description: o.Description, preview: o.Preview || undefined}))}))};
-          op({op: 'allow', id: v.ID, input});
-        }
-      };
-    }
-    return a;
-  };
-  const drop = i => { const a = asks.get(i); a && a.remove(); asks.delete(i); };
-
-  // decisions: the block its last turn ended with (info.decisions), each
-  // decision an ask and its options lettered, the agent's picks chosen to
-  // start with. Your answers go as your next message in the block's own
-  // numbering, as rush's card sends them (rush_host's decision_answer):
-  // "1a. Topic: label" for an option, "2: your words" for words of your
-  // own, one left unanswered left out. A card answered or dismissed is
-  // remembered here, so the info that still carries it doesn't bring it back.
-  const goneKey = `rush.decided.${machine}/${id}`;
-  let decided = sessionStorage.getItem(goneKey), decEl = null;
-  const decisionsEl = v => {
-    const a = document.createElement('div'); a.className = 'ask';
-    const qs = v.Asks || [], pick = qs.map(q => (q.Options || []).findIndex(o => o.Picked));
-    a.innerHTML = `<h3>${qs.length > 1 ? qs.length + ' decisions' : 'a decision'}</h3>` + qs.map((q, n) => {
-      // its text is the lead-in, then "1. Topic"
-      const name = `${q.ID}. ${q.Header}`, lead = (q.Text || '').endsWith(name) ? q.Text.slice(0, -name.length).trim() : q.Text || '';
-      return `<section class=decision><h4>${esc(name)}</h4>${lead ? `<div class=lead>${md(lead)}</div>` : ''}
-        <div class=choices>${(q.Options || []).map((o, i) => `<button class=choice data-n=${n} data-i=${i} aria-pressed=${i === pick[n]}><b>${esc(o.Key)}</b> ${esc(o.Label)}${o.Picked ? ' <em>its pick</em>' : ''}${
-          o.Description ? `<small>${esc(o.Description)}</small>` : ''}${o.Preview ? `<pre>${esc(o.Preview)}</pre>` : ''}</button>`).join('')}</div>
-        <input class=field data-own=${n} placeholder="or in your own words" aria-label="${esc(name)}, in your own words" enterkeyhint=done></section>`;
-    }).join('') + '<div class=actions><button class="key key-on" data-k=ok>send answers</button><button class=key data-k=no>dismiss</button></div>';
-    const own = n => $(`[data-own="${n}"]`, a).value.trim();
-    const draw = () => {
-      $$('.choice', a).forEach(b => b.setAttribute('aria-pressed', +b.dataset.i === pick[b.dataset.n] && !own(b.dataset.n)));
-      const n = qs.filter((q, n) => own(n) || pick[n] >= 0).length;
-      $('[data-k=ok]', a).textContent = n === qs.length ? (n > 1 ? `send ${n} answers` : 'send answer') : `send ${n} of ${qs.length}`;
-      $('[data-k=ok]', a).disabled = !n;
-    };
-    a.oninput = draw; // your own words stand in for an option
-    const done = async o => {
-      $$('.actions button', a).forEach(b => b.disabled = true);
-      if (await op(o)) { decided = v.ID; sessionStorage.setItem(goneKey, v.ID); a.remove(); if (decEl === a) decEl = null; }
-      else { $$('.actions button', a).forEach(b => b.disabled = false); draw(); } // it's kept, to send again
-    };
-    a.onclick = ev => {
-      const b = ev.target.closest('button');
-      if (!b || b.disabled) return;
-      if (b.dataset.i) {
-        // picked again, it's let go; picking one puts your own words aside
-        const n = b.dataset.n, i = +b.dataset.i;
-        pick[n] = pick[n] === i && !own(n) ? -1 : i;
-        $(`[data-own="${n}"]`, a).value = '';
-        draw();
-      } else if (b.dataset.k === 'no') done({op: 'decisions_dismiss', id: v.ID});
-      else if (b.dataset.k === 'ok') {
-        const text = qs.map((q, n) => {
-          const o = (q.Options || [])[pick[n]];
-          return own(n) ? `${q.ID}: ${own(n)}` : o ? `${q.ID}${o.Key}. ${q.Header}: ${o.Label}` : '';
-        }).filter(Boolean).join('\n\n');
-        if (text) done({op: 'send', text});
-      }
-    };
-    draw();
-    return a;
-  };
-  const showDecisions = d => {
-    if (decEl && (!d || decEl.dataset.id !== d.ID)) { decEl.remove(); decEl = null; }
-    if (!d || d.ID === decided || decEl) return;
-    decEl = decisionsEl(d); decEl.dataset.id = d.ID; $('#asks').append(decEl); down();
-  };
-
-  // details: how it is, and what can be done with it from here
-  let open = null;
-  const details = () => { open = sheet('<div id=dt class=space-y-3></div>', 'details'); open.addEventListener('close', () => open = null); drawDetails(); };
-  const drawDetails = () => {
-    if (!open) return;
-    const t = [...tasks.values()].filter(x => !x.done);
-    const away = info.away && !info.away.ended, ended = info.away && info.away.ended, lim = info.limit;
-    const hm = d => new Date(d).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-    const held = info.away && (info.away.held || []).length;
-    $('#dt', open).innerHTML = `<fieldset class=box><legend><b>${esc(info.name || id)}</b></legend><dl class=facts>
-        <dt>state</dt><dd>${state(stateOf({...info, alive: info.alive ?? true}), info.needs)}</dd>
-        <dt>agent</dt><dd>${esc([agentName(info.kind), info.model, info.effort].filter(Boolean).join(' · '))}</dd>
-        ${info.costUsd ? `<dt>spent</dt><dd class=tabular-nums>${money(info.costUsd)}</dd>` : ''}
-        <dt>folder</dt><dd class=text-blue>${esc(home(info.cwd))}</dd>
-        <dt>machine</dt><dd>${esc(machine)}</dd></dl></fieldset>
-      ${lim ? `<fieldset class=box><legend>usage limit</legend><p class=text-sub>until ${hm(lim.resetsAt)}; ${lim.continue ? 'carries on then' : 'waits for you'}</p><div class="pt-2"><button class=key data-l=${lim.continue ? 0 : 1}>${lim.continue ? "don't carry on" : 'carry on then'}</button></div></fieldset>` : ''}
-      <fieldset class=box><legend>away</legend>${away ? `<p class=text-sub>you're away${info.away.until && !info.away.until.startsWith('0001') ? ' until ' + hm(info.away.until) : ''}${held ? ` · ${held} held for you` : ''}</p><div class=pt-2><button class="key key-on" data-a=back>i'm back</button></div>`
-        : ended ? `<p class=text-sub>your away is over${held ? ` · ${held} held for you` : ''}</p><div class=pt-2><button class=key data-a=back>ok</button></div>`
-        : `<p class=text-dim>the agent carries on, checked on every 30 minutes</p><div class="flex flex-wrap gap-1.5 pt-2"><button class=key data-a=away>i'm away…</button><span id=awayfor class="hidden flex gap-1.5">${[1, 2, 4, 8].map(h => `<button class=key data-h=${h}>${h}h</button>`).join('')}</span></div>`}</fieldset>
-      ${t.length ? `<fieldset class=box><legend>in the background</legend>${t.map(x => `<div class="flex items-center gap-2 py-0.5"><span class="flex-1 truncate">${esc(x.Label || x.ID)} <span class=text-dim>${esc(x.status || '')}</span></span><button class="key key-plain key-bad" data-t="${esc(x.ID)}">stop</button></div>`).join('')}</fieldset>` : ''}
-      ${(info.queue || []).length ? `<fieldset class=box><legend class=text-queue>queue ${info.queue.length} · sends when this turn ends</legend>${info.queue.map((m, i) => `<div class="flex items-center gap-2 py-0.5"><span class=text-dim>${i + 1}</span><span class="flex-1 truncate">${esc(m)}</span><button class="key key-plain" data-q=${i} data-w="${esc(m)}">now</button><button class="key key-plain key-bad" data-r=${i} data-w="${esc(m)}">remove</button></div>`).join('')}</fieldset>` : ''}`;
-    $('#dt', open).onclick = e => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      if (b.dataset.t) op({op: 'stop_task', id: b.dataset.t});
-      if (b.dataset.q) op({op: 'queue_send', index: +b.dataset.q, was: b.dataset.w});
-      if (b.dataset.r) op({op: 'queue_remove', index: +b.dataset.r, was: b.dataset.w});
-      if (b.dataset.l) op({op: 'limit', now: b.dataset.l === '1'});
-      if (b.dataset.a === 'back') op({op: 'away'});
-      if (b.dataset.a === 'away') $('#awayfor', open).classList.toggle('hidden');
-      if (b.dataset.h) {
-        const now = new Date();
-        op({op: 'away', away: {from: now.toISOString(), until: new Date(+now + b.dataset.h * 3600e3).toISOString(), next: '0001-01-01T00:00:00Z'}})
-          .then(ok => ok && toast(`away for ${b.dataset.h}h`));
-      }
-    };
-  };
-
-  const es = new EventSource(base + `/api/sessions/${encodeURIComponent(id)}/events` + (full ? '?full=1' : ''));
-  sc.on(() => { es.close(); if (re) clearTimeout(re.t); });
-  es.onmessage = m => {
-    if (!sc.live) return;
-    const e = JSON.parse(m.data), v = e.e || {};
-    switch (e.t) {
-      case 'reset': replay(); break;
-      case 'cut':
-        if (full) into.prepend(el('<p class="px-3 py-2 text-faint">— the earliest history is too long to show —</p>'));
-        else { const b = el('<div class="px-3 py-2"><button class="key key-plain text-dim" id=earlier>↑ show earlier</button></div>'); into.prepend(b); $('button', b).onclick = () => go(`#/s/${encodeURIComponent(machine)}/${id}/all`); }
-        break;
-      case 'sent': live = null; add(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
-      case 'delta': if (v.Kind === 0) {
-        if (!live) { live = add('<div class=say></div>'); live._s = ''; }
-        live._s += v.Text; live.textContent = live._s; down();
-      } break;
-      case 'message':
-        if (v.Parent) break;
-        if (v.Role === 'assistant') {
-          for (const p of v.Parts || []) {
-            if (p.Kind === 0 && p.Text.trim()) { if (live) { live.innerHTML = md(p.Text); live = null; } else add(`<div class=say>${md(p.Text)}</div>`); }
-            else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); into.append(c); calls.set(p.Call.ID, c); down(); }
-          }
-        } else for (const p of v.Parts || []) {
-          if (p.Kind === 0 && p.Text && !v.Injected && !live) add(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
-          if (p.Kind === 3 && p.Output) {
-            const o = p.Output, c = calls.get(o.CallID), txt = (o.Text || o.Stdout || '').slice(0, 3000);
-            if (c) { if (txt) $('.step-body', c).insertAdjacentHTML('beforeend', `<pre>${esc(txt)}</pre>`); finish(c, o.IsError); }
-          }
-        }
-        break;
-      case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
-      case 'approval': case 'question': {
-        const had = asks.get(v.ID);
-        if (re && had) { delete had.dataset.stale; break; }
-        drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
-      case 'approval_cancelled': case 'answered': drop(v.ID); break;
-      case 'task_started': tasks.set(v.ID, v); drawDetails(); break;
-      case 'task_updated': case 'task_done': { const t = tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; tasks.set(v.ID, t); drawDetails(); } break;
-      case 'task_progress': { const t = tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool; drawDetails(); } } break;
-      case 'background': { const ids = new Set((v.Tasks || []).map(t => t.ID)); tasks.forEach((t, k) => { if (!ids.has(k)) t.done = true; }); (v.Tasks || []).forEach(t => { if (!tasks.has(t.ID)) tasks.set(t.ID, t); }); drawDetails(); } break;
-      case 'plan': {
-        const todos = v.Todos || [], now = todos.find(t => t.Status === 'in_progress'), done = todos.filter(t => t.Status === 'completed').length;
-        const h = `<div class=plan><div>${esc(now ? now.Label : 'plan')} <span class=text-dim>${done}/${todos.length}</span></div><ul>${todos.map(t => `<li data-s="${esc(t.Status)}"><span>${t.Status === 'completed' ? '✓' : t.Status === 'in_progress' ? '▸' : '·'}</span><span>${esc(t.Label)}</span></li>`).join('')}</ul></div>`;
-        if (plan) { const n = el(h); plan.replaceWith(n); plan = n; } else plan = add(h);
-      } break;
-      case 'turn_end': live = null; if (v.Err) add(`<div class=err-line>✗ ${esc(v.Err)}</div>`); break;
-      case 'error': add(`<div class=err-line>✗ ${esc(v.Error)}</div>`); break;
-      case 'info':
-        info = v; head(); drawDetails();
-        if (v.state && v.state !== 'blocked') { asks.forEach(a => a.remove()); asks.clear(); } // a decision no longer waited on is stale
-        showDecisions(v.decisions);
-        break;
-    }
-    // the replay is in once nothing has come for a moment, or it has run long
-    // (what streams as it's written doesn't hold it open)
-    if (re) {
-      if (Date.now() - re.at > 2500) settle();
-      else if (e.t !== 'delta' || !re.t) { clearTimeout(re.t); re.t = setTimeout(settle, 120); }
-    }
-  };
+async function subscribe() {
+  try {
+    const k = await (await api('/push')).json();
+    if (await Notification.requestPermission() !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({userVisibleOnly: true,
+      applicationServerKey: Uint8Array.from(atob(k.key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))});
+    await post('/push', sub.toJSON()); toast('notifications on');
+  } catch (e) { toast('Notifications: ' + (e === 401 ? 'sign in again' : e.message || e), 'bad'); }
 }
+
+// ── the palette, and the keys ──
+function palette() {
+  if ($('dialog.palette')) return;
+  const d = el(`<dialog class=palette aria-label="Go to anything"><input type=text placeholder="Go to a session, or do something" aria-label=Search autocapitalize=off autocorrect=off spellcheck=false role=combobox aria-expanded=true aria-controls=palist><ul id=palist role=listbox></ul></dialog>`);
+  const items = [
+    ...view.acts,
+    {name: 'New session', hint: 'n', run: () => go('#/new')},
+    {name: 'Settings and devices', run: () => go('#/devices')},
+    {name: themeNow() === 'light' ? 'Dark theme' : 'Light theme', run: () => setTheme(themeNow() === 'light' ? 'dark' : 'light')},
+    {name: 'Keyboard shortcuts', hint: '?', run: shortcuts},
+    ...machines.filter(m => m.name !== machine).map(m => ({name: 'Switch to ' + m.name, run: () => { setMachine(m.name); go('#/'); syncList(true); }})),
+    ...lastList.map(i => ({...i, st: stateOf(i)})).sort((a, b) => groups.findIndex(g => g[0] === groupOf(a.st)) - groups.findIndex(g => g[0] === groupOf(b.st)) || (a.updatedAt < b.updatedAt ? 1 : -1))
+      .map(i => ({name: i.name || i.id, mark: `<span class="st-${i.st}">${marks[i.st] || '·'}</span>`, hint: project(i.cwd).name, more: `${i.cwd} ${agentName(i.kind)} ${i.st}`, run: () => go(sessionHash(i.id))})),
+  ];
+  let shown = [], at = 0;
+  const draw = () => {
+    const words = $('input', d).value.toLowerCase().split(/\s+/).filter(Boolean);
+    shown = items.filter(i => words.every(w => `${i.name} ${i.hint || ''} ${i.more || ''}`.toLowerCase().includes(w))).slice(0, 60);
+    at = Math.min(at, Math.max(0, shown.length - 1));
+    $('ul', d).innerHTML = shown.map((i, n) => `<li role=option aria-selected=${n === at} data-n=${n}>${i.mark || '<span class=c-orange>❯</span>'}<span class=cut>${esc(i.name)}</span><small>${esc(i.hint || '')}</small></li>`).join('') || '<li class=none>Nothing by that name.</li>';
+    $('[aria-selected=true]', d)?.scrollIntoView({block: 'nearest'});
+  };
+  const run = n => { const i = shown[n]; d.close(); if (i) i.run(); };
+  $('input', d).oninput = () => { at = 0; draw(); };
+  d.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % Math.max(1, shown.length); draw(); }
+    if (e.key === 'Enter') { e.preventDefault(); run(at); }
+  };
+  d.onclick = e => { const li = e.target.closest('li[data-n]'); if (li) run(+li.dataset.n); else if (e.target === d) d.close(); };
+  d.addEventListener('close', () => d.remove());
+  document.body.append(d); d.showModal(); draw();
+}
+$('#pal').onclick = palette;
+function shortcuts() {
+  const mod = mac ? '⌘' : 'ctrl';
+  sheet(`<dl class=keys-list>${[
+    [`${mod} K`, 'go to a session, or do something'], ['/', 'search the sessions'], ['n', 'a new session'], ['j  k', 'down and up the list; enter opens'],
+    ['alt ↓  alt ↑', 'the next session, the one before'], ['esc', 'back to the sessions; out of a box'], ['enter', 'send (shift enter for a new line)'], [`${mod} enter`, 'steer: into the turn under way'],
+    ['ctrl C', 'stop the turn, when the box is empty'], ['alt A  alt D', 'allow, deny the approval waiting'], ['c', 'changes'], ['i', 'details'], ['e', 'into the message box'], ['?', 'these'],
+  ].map(([k, w]) => `<dt>${k.split('  ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</dt><dd>${esc(w)}</dd>`).join('')}</dl>`, {title: 'Keyboard shortcuts', sc: null});
+}
+$('#keys').onclick = shortcuts;
+addEventListener('keydown', e => {
+  if (!machines.length || e.defaultPrevented) return;
+  const mod = e.metaKey || e.ctrlKey, t = e.target, typing = t.matches('input, textarea, select, [contenteditable]');
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); return palette(); }
+  if ($('dialog[open]')) return;
+  if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); return stepSession(e.key === 'ArrowDown' ? 1 : -1); }
+  if (e.altKey && view.keys['alt+' + e.code]) { e.preventDefault(); return view.keys['alt+' + e.code](); }
+  if (e.key === 'Escape') { if (typing) return t.blur(); if ($('#app').dataset.route !== 'home') return go('#/'); }
+  if (typing || mod || e.altKey) return;
+  const k = e.key;
+  if (k === '/') { e.preventDefault(); if (!wide() && $('#app').dataset.route !== 'home') go('#/'); return $('#q').focus(); }
+  if (k === '?') return shortcuts();
+  if (k === 'n') { e.preventDefault(); return go('#/new'); }
+  if (k === 'j' || (k === 'ArrowDown' && $('#side').contains(t))) { e.preventDefault(); return stepRow(1); }
+  if (k === 'k' || (k === 'ArrowUp' && $('#side').contains(t))) { e.preventDefault(); return stepRow(-1); }
+  if (view.keys[k]) { e.preventDefault(); view.keys[k](); }
+});
 
 // picture is an image file as a send carries it. A type an agent can't take
 // (a phone's HEIC, say) or a big one is redrawn as a JPEG at most 2000px.
@@ -671,14 +667,5 @@ async function picture(f) {
   return {type: blob.type, data: url.slice(url.indexOf(',') + 1)};
 }
 
-async function subscribe() {
-  try {
-    const k = await (await api('/push')).json();
-    if (await Notification.requestPermission() !== 'granted') return;
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.subscribe({userVisibleOnly: true,
-      applicationServerKey: Uint8Array.from(atob(k.key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))});
-    await post('/push', sub.toJSON()); toast('notifications on');
-  } catch (e) { toast('Notifications: ' + e, 'bad'); }
-}
+themeColor();
 start();

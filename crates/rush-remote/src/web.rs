@@ -5,10 +5,12 @@
 use crate::http::{Request, Response};
 
 /// Each file, its name and what it holds.
-const FILES: [(&str, &[u8]); 6] = [
+const FILES: [(&str, &[u8]); 8] = [
     ("index.html", include_bytes!("../web/index.html")),
     ("app.css", include_bytes!("../web/app.css")),
     ("app.js", include_bytes!("../web/app.js")),
+    ("md.js", include_bytes!("../web/md.js")),
+    ("session.js", include_bytes!("../web/session.js")),
     ("icon.svg", include_bytes!("../web/icon.svg")),
     (
         "manifest.webmanifest",

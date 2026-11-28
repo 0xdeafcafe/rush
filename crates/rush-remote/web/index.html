@@ -2,9 +2,11 @@
 <html lang=en>
 <meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
-<meta name=theme-color media="(prefers-color-scheme: dark)" content="#161514">
-<meta name=theme-color media="(prefers-color-scheme: light)" content="#f7f4ee">
+<meta name=theme-color content="#111111">
+<meta name=color-scheme content="dark light">
+<meta name=description content="Your agents on this machine, from a phone or a browser.">
 <meta name=apple-mobile-web-app-capable content=yes>
+<meta name=mobile-web-app-capable content=yes>
 <meta name=apple-mobile-web-app-status-bar-style content=black-translucent>
 <meta name=apple-mobile-web-app-title content=Rush>
 <link rel=manifest href=/manifest.webmanifest>
@@ -12,11 +14,39 @@
 <link rel=apple-touch-icon href=/icon.svg>
 <link rel=stylesheet href=/app.css>
 <title>Rush</title>
-<header class=appbar>
-  <button id=back class="key key-plain" aria-label=Back></button>
-  <div class=appbar-title><b id=title>Rush</b><small id=sub></small></div>
-  <div id=actions class="flex items-center gap-1"></div>
-</header>
-<main id=main class="mx-auto max-w-3xl"></main>
-<div id=toasts class=toasts aria-live=polite></div>
-<script src=/app.js></script>
+<script src=/md.js></script>
+<a class=skip href=#main>Skip to the content</a>
+<div id=app data-route=load>
+  <aside id=side aria-label=Sessions>
+    <header class=sidehead>
+      <span id=logo></span>
+      <div class=sidehead-title><b>rush</b><small id=sum aria-live=polite></small></div>
+      <button class="key key-plain wide-only" id=pal aria-label="Command palette" title="Command palette"><kbd id=palkey>ctrl K</kbd></button>
+      <button class="key wide-only" id=sidenew><span class=c-orange>+</span> new</button>
+    </header>
+    <div id=machs class=tabs role=tablist aria-label=Machine hidden></div>
+    <label class=search><span aria-hidden=true>⌕</span><input id=q type=search placeholder="Search sessions" aria-label="Search sessions" autocapitalize=off autocorrect=off spellcheck=false enterkeyhint=search><kbd class=wide-only>/</kbd></label>
+    <div id=listbox class=scroller>
+      <div id=conn class=conn role=status hidden></div>
+      <div id=list></div>
+      <div id=oth></div>
+    </div>
+    <footer class="sidefoot wide-only"><a class="key key-plain" href=#/devices>settings</a><button class="key key-plain" id=keys>shortcuts <kbd>?</kbd></button></footer>
+  </aside>
+  <section id=pane>
+    <header class=appbar>
+      <button id=back class="key key-plain" aria-label="Back to sessions">‹</button>
+      <div class=appbar-title><h1 id=title>Rush</h1><div id=sub class=appbar-sub></div></div>
+      <div id=actions class=appbar-acts></div>
+    </header>
+    <main id=main tabindex=-1></main>
+  </section>
+  <nav id=tabbar class=tabbar aria-label=Main>
+    <a href=#/ data-tab=home><span aria-hidden=true>◆</span>sessions<i id=tabn hidden></i></a>
+    <a href=#/new data-tab=new><span aria-hidden=true class=c-orange>+</span>new</a>
+    <a href=#/devices data-tab=devices><span aria-hidden=true>≡</span>settings</a>
+  </nav>
+</div>
+<div id=toasts class=toasts></div>
+<script src=/session.js defer></script>
+<script src=/app.js defer></script>
