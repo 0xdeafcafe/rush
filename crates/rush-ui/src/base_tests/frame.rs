@@ -323,7 +323,10 @@ fn page_tabs_without_clanker_and_narrow() {
     let tabs = f[2].find("Agents").unwrap();
     let pages = f[3].find("Agents").unwrap();
     assert_eq!(pages + 1, tabs, "lined up with the places: {f:?}");
-    assert!(f[3].trim_end().ends_with("Agents   Wall   [ ]"), "{f:?}");
+    assert!(
+        f[3].trim_end().ends_with("Agents   Wall   [ ] pages"),
+        "{f:?}"
+    );
     assert!(f[4].starts_with("────"), "{f:?}");
     let x = rush_core::text::width(&f[3][..f[3].find("Wall").unwrap()]) + 1;
     m.mouse_event(&Mouse {

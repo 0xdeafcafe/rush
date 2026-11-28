@@ -416,7 +416,7 @@ impl Model {
     /// The tab at (x, y) of the header as last drawn: (index, is a page)
     /// (headerTabAt).
     pub fn header_tab_at(&self, x: usize, y: usize) -> Option<(usize, bool)> {
-        if self.sheet.is_some() || x >= self.w || y >= self.top_h() {
+        if self.sheet.is_some() || x >= self.w || y >= self.top_h() || self.head_small() {
             return None;
         }
         let at = |line: &str, names: &[String]| {
@@ -576,7 +576,11 @@ pub fn page_tabs_line(names: &[String], cur: usize, hover: Option<usize>, w: usi
         }
     }
     let mut tabs = render(from, to);
-    if tabs.width() + 6 <= w {
+    // The keys that turn them, and what they turn (Rust-only: Go's bare
+    // "[ ]" read as an empty checkbox).
+    if tabs.width() + 12 <= w {
+        tabs.spans.push(sp("   [ ] pages", DIM));
+    } else if tabs.width() + 6 <= w {
         tabs.spans.push(sp("   [ ]", DIM));
     }
     fit(tabs, w)

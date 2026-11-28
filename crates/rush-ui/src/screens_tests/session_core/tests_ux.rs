@@ -651,3 +651,47 @@ fn a_failed_step_stands_out() {
         "{f}"
     );
 }
+
+/// A conversation that has the screen keeps one row of the header: where
+/// you are and what's waiting, without the places, their pages or
+/// clanker. Beside the list the header is whole.
+#[test]
+fn a_conversation_alone_has_a_one_row_header() {
+    let mut m = busy(200, 56);
+    let f = drawn(&mut m);
+    let rows: Vec<&str> = f.lines().collect();
+    assert!(rows[0].starts_with("  rush › Agents   ✻ 1 working"), "{f}");
+    assert!(rows[1].starts_with("────"), "{f}");
+    assert_eq!(m.top_h(), 2);
+    assert!(!f.contains("Harnesses"), "the places aren't here:\n{f}");
+    assert!(!f.contains("Wall"), "nor their pages:\n{f}");
+    assert_eq!(m.header_tab_at(9, 0), None, "no tab under the pointer");
+    // Beside the list: the whole header, its places a click away.
+    m.full = false;
+    let f = drawn(&mut m);
+    assert!(m.top_h() > 2, "{f}");
+    assert!(
+        f.contains("Agents   Projects   Harnesses   Settings"),
+        "{f}"
+    );
+    assert!(f.contains("Agents   Wall   [ ] pages"), "{f}");
+}
+
+/// The title has its row: a long one is whole where the row has room,
+/// and its handle goes before it's cut.
+#[test]
+fn the_title_takes_the_row() {
+    let long =
+        "Drive faster coordination from the web fixes through to the escalation path and back";
+    let mut m = busy(200, 56);
+    m.agents[0].display_name = long.into();
+    let f = drawn(&mut m);
+    assert!(f.contains(long), "{f}");
+    assert!(f.contains("·  working"), "its state stays:\n{f}");
+    let mut m = busy(120, 40);
+    m.agents[0].display_name = long.into();
+    let f = drawn(&mut m);
+    assert!(f.contains(long), "{f}");
+    assert!(!f.contains("@drive-faster"), "the handle went first:\n{f}");
+    assert!(f.contains("·  working"), "{f}");
+}

@@ -187,7 +187,7 @@ fn list_at_120() {
     let f = plain(&mut m, 120, 40, &[]);
     snapshot("list_120x40", &f);
     let rows: Vec<&str> = f.lines().collect();
-    assert!(rows[1].contains("rush   ● 1 needs you   ✻ 2 working"));
+    assert!(rows[1].contains("rush   ● 1 needs you ctrl+n   ✻ 2 working"));
     assert!(!rows[1].contains("finished"));
     assert!(rows[6].starts_with("  AGENTS▾"));
     assert!(rows[6].ends_with("RUNNING   CPU    RAM TOKENS    COST   TIME"));

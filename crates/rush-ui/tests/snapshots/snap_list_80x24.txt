@@ -1,7 +1,7 @@
      !
-    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
+    ▄▄▄▄      rush   ● 1 needs you ctrl+n   ✻ 2 working                default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
-    RUSH      Agents   Wall   [ ]
+    RUSH      Agents   Wall   [ ] pages
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                             RAM TOKENS    COST   TIME

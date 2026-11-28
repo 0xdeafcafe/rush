@@ -997,7 +997,7 @@ fn clicks_miss_a_card_out_of_sight() {
     let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
     m.cards().host = Some(super::cards_host::host());
     m.w = 100;
-    m.h = 30;
+    m.h = 26; // the header is one row here
     let now = m.now;
     let end = rush_core::event::Event::TurnEnd(rush_core::event::TurnEnd::default());
     for i in 0..30 {

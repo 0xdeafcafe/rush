@@ -4435,6 +4435,40 @@ at):
   pinned as "first" or "latest". From ten rows a rule closes the pins
   at the top off from the rows under them (`top_pin_rows`; a jump to a
   pinned prompt lands under it).
+- **A conversation that has the screen keeps one row of the header**
+  (`header::head_small`, `top_h`). The header's three rows and clanker
+  beside them (six with the rule) were the list's: the places and the
+  pages (Agents, Wall) lead nowhere from inside a conversation. Alone on
+  the screen (not beside the list, where the header is whole, nor
+  hosted's one conversation, whose places are its only way round) the
+  header is "rush › Agents", the counts, and on the right the account
+  (or a word on a newer rush, still a click), then the rule: four rows
+  back to the conversation. No tab is under the pointer there
+  (`header_tab_at`).
+- **The header says the key beside what it's for.** "● 1 needs you" is
+  followed by "ctrl+n" while there is one to go to
+  (`header::counts`, by `waiting_elsewhere`). The pages row's bare
+  "[ ]", which read as an empty checkbox, is "[ ] pages" where there's
+  room (`page_tabs_line`).
+- **The calm header's account is the conversation's, and the rest are
+  counted** (`top::header_gauges`). Inside a conversation the account
+  is the one its agent runs on, not the one the next session would
+  start on; the other accounts with nothing left are " · 2 at limit",
+  dim, not a meter each. Its colour is its bar's alone, which moves
+  with its level.
+- **"restart to update"** is what a session whose host runs an older
+  rush says (the agent bar's `rush` segment; Go's "older rush" said
+  what, not what to do).
+- **The title has its row** (`agent::rows_with`). Go cut a name at 56
+  cells or half the row, whichever was less, with the row's right
+  empty. The name takes what the state and one reading of the bar
+  (16 cells) leave; the bar drops its segments first, and the @handle
+  goes before the name is cut.
+- **A message's card says "this session"** for the end that is the
+  conversation you're reading (`draw::exchange_who`): "◇ Reviewer 2b3c
+  → this session". Go named both ends, each cut to half the top edge,
+  so the title already over the conversation took the room the other
+  agent's name needed.
 - **Colour.** Orange is for what runs now: the agent's name on a turn is
   bold text, "◇ context compacted" is dim, not bright blue. The
   conversation's faint tier is (108, 102, 94), up from Go's (94, 89,

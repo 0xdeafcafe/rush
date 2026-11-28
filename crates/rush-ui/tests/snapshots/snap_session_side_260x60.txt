@@ -1,7 +1,7 @@
      !
-    ▄▄▄▄      rush   ● 1 needs you   ✻ 3 working                                                                                                                                                                                                           default
+    ▄▄▄▄      rush   ● 1 needs you ctrl+n   ✻ 3 working                                                                                                                                                                                                    default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                                                                                                                                                              0% cpu · – · 37.0G free · 80%
-    RUSH      Agents   Wall   [ ]
+    RUSH      Agents   Wall   [ ] pages
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                    RAM    COST   TIME │

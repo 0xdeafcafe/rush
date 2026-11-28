@@ -169,7 +169,7 @@ fn tabs_name_the_place_pages() {
         tabs.starts_with("General   Usage   Keys   Plugins   Updates   Remote"),
         "{tabs}"
     );
-    assert!(tabs.trim_end().ends_with("[ ]"), "{tabs}");
+    assert!(tabs.trim_end().ends_with("[ ] pages"), "{tabs}");
     let tabs = workspace::tabs(&m, PlaceId::Harnesses, 140).plain();
     assert!(tabs.starts_with("Providers   Harnesses   Config"), "{tabs}");
     // Narrow, the page showing and its neighbours stay, with ‹ › for the

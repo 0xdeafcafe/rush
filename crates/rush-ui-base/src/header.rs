@@ -90,13 +90,29 @@ impl Model {
         best.map(|a| (n, a.key.clone(), one_line(&a.display_name)))
     }
 
+    /// A conversation that has the screen keeps one row of the header
+    /// (Rust-only): the places and their pages lead nowhere from inside
+    /// it, and clanker's five rows are the conversation's. Beside the
+    /// list the header is whole.
+    pub fn head_small(&self) -> bool {
+        // Hosted's one conversation has no list to go back to: its
+        // places are the only way round, so they stay.
+        if self.session.is_none() || self.on_place() || self.ext.calls.hosted_alone()(self) {
+            return false;
+        }
+        let (lw, pw) = crate::split::widths(self);
+        lw == 0 || pw == 0
+    }
+
     /// The rows above the body: the header and a rule. With clanker the
     /// header is as tall as he is and the three rows of text (the counts,
     /// the places, the pages) sit beside him from his head down
     /// (`TEXT_AT`); without him it is the three rows. The small screens
     /// keep the taller one, its places and pages a row each.
     pub fn top_h(&self) -> usize {
-        if self.w < NARROW {
+        if self.head_small() {
+            2
+        } else if self.w < NARROW {
             5
         } else if self.cfg.hide_logo {
             TEXT_ROWS + 1
@@ -122,7 +138,12 @@ impl Model {
         let mut c = Vec::new();
         if t.blocked > 0 {
             let say = if short { "needs" } else { "needs you" };
-            c.push(line([spb(format!("● {} {say}", t.blocked), YELLOW)]));
+            let mut l = line([spb(format!("● {} {say}", t.blocked), YELLOW)]);
+            // The key that goes to it, beside it (Rust-only).
+            if !short && self.waiting_elsewhere().is_some() {
+                l.spans.push(sp(" ctrl+n", DIM));
+            }
+            c.push(l);
         }
         if t.working > 0 {
             let say = if short { "" } else { " working" };
@@ -164,9 +185,16 @@ impl Model {
     /// Also the places' and the pages' rows as drawn, for clicks, and what
     /// the top bar had no room for.
     pub fn head_rows(&self, w: usize) -> (Vec<Line>, [String; 2], Drops) {
+        self.head_rows_of(w, false)
+    }
+
+    /// `head_rows`; with `small` the first row is the only one that
+    /// counts: no clanker beside it, where you are after "rush", and a
+    /// word on updates in place of the account.
+    fn head_rows_of(&self, w: usize, small: bool) -> (Vec<Line>, [String; 2], Drops) {
         let t = self.tally();
         let md = self.mood(t);
-        let (face, gap) = if self.cfg.hide_logo {
+        let (face, gap) = if self.cfg.hide_logo || small {
             (vec![Line::new(); TEXT_ROWS], "")
         } else {
             let r = self.robot(md, t);
@@ -188,6 +216,10 @@ impl Model {
             let mut l = lead(0);
             l.spans
                 .push(Span::new("rush", Style::fg(TEXT).bold().italic()));
+            if small {
+                l.spans.push(sp(" › ", FAINT));
+                l.spans.push(sp(self.place.name(), DIM));
+            }
             for c in self.counts(t, short) {
                 l.spans.push(plain("   "));
                 join(&mut l, c);
@@ -315,6 +347,20 @@ impl Model {
             }
             row1 = pick.unwrap_or_else(|| fit(tabs.clone(), w));
         }
+        // The one row of a conversation's header says a newer rush where
+        // the whole header's pages row would.
+        let row0 = match self.update_notice().filter(|n| small && n.width() > 0) {
+            Some(n) => {
+                let l = left0(false);
+                let l = if l.width() + n.width() + 3 > w {
+                    left0(true)
+                } else {
+                    l
+                };
+                spread(l, n, w)
+            }
+            None => row0,
+        };
         let (row1, row2) = (fit(row1, w), fit(pages, w));
         let text = [row1.plain(), row2.plain()];
         (vec![fit(row0, w), row1, row2], text, drops)
@@ -325,7 +371,7 @@ impl Model {
     pub fn header(&mut self) -> Vec<Line> {
         let w = self.w;
         crate::clanker::step(self);
-        if w < NARROW {
+        if w < NARROW && !self.head_small() {
             let t = self.tally();
             let md = self.mood(t);
             let mut counts = self.counts(t, true);
@@ -337,6 +383,13 @@ impl Model {
             }
             self.note_update_notice(0, "");
             return self.narrow_header(md, counts);
+        }
+        if self.head_small() {
+            let (rows, _, _) = self.head_rows_of(w, true);
+            let row = rows.into_iter().next().unwrap_or_default();
+            self.header_text = Default::default();
+            self.note_update_notice(0, &row.plain());
+            return vec![row, line([sp("─".repeat(w), FAINT)])];
         }
         let (text_rows, text, drops) = self.head_rows(w);
         if let Some(tb) = self.ext.top_bar {
