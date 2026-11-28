@@ -715,8 +715,36 @@ pub fn header_gauges(m: &Model) -> Option<Gauges> {
     {
         return None;
     }
-    let (_, q) = start_plan(m);
-    let mut account = line([sp(start_account(m), TEXT)]);
+    let (_, mut q) = start_plan(m);
+    let mut who = start_account(m);
+    let mut k = start_kind(m);
+    // A conversation that has the screen says the account it runs on,
+    // not the one the next would start on (Rust-only).
+    let open = m
+        .session
+        .as_ref()
+        .filter(|_| m.head_small())
+        .and_then(|v| m.agents.iter().find(|a| a.key == v.key))
+        .map(|a| a.kind.as_str().to_string());
+    if let Some(r) = open
+        .filter(|o| *o != k)
+        .and_then(|o| in_use_rows(m).into_iter().rfind(|r| r.kind == o))
+    {
+        who = crate::look::agent_name(&m.reg, &r.kind);
+        if r.current {
+            who = format!("{who} · {}", r.name);
+        }
+        q = r.q.since(now(m));
+        k = r.kind;
+    }
+    let mut account = line([sp(who, TEXT)]);
+    // The other accounts with nothing left, counted: which, and when
+    // each is back, is the accounts' to say (Rust-only).
+    let out = account_rows(m)
+        .iter()
+        .filter(|r| !r.head && !(r.current && r.kind == k))
+        .filter(|r| r.q.since(now(m)).used("") >= 100.0)
+        .count();
     if !q.windows.is_empty() {
         let p = q.used("");
         let fill = ((p / 100.0 * 3.0 + 0.5) as usize).min(3);
@@ -725,6 +753,9 @@ pub fn header_gauges(m: &Model) -> Option<Gauges> {
         account.spans.push(sp("▱".repeat(3 - fill), FAINT));
     } else if !q.problem.is_empty() {
         account.spans.push(sp(" limits unavailable", YELLOW));
+    }
+    if out > 0 {
+        account.spans.push(dim(format!(" · {out} at limit")));
     }
     let pace = match m.ext.calls.guard_state()(m).1 {
         Some((name, r)) => sp(

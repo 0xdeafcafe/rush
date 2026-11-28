@@ -598,7 +598,10 @@ fn billing_and_an_older_rush() {
         exe_mod,
         ..Info::default()
     };
-    assert_eq!(line(&m, info("overage", 1_000)), "extra usage · older rush");
+    assert_eq!(
+        line(&m, info("overage", 1_000)),
+        "extra usage · restart to update"
+    );
     assert_eq!(line(&m, info("metered", 2_000)), "API billed");
     assert_eq!(line(&m, info("plan", 0)), "");
 }

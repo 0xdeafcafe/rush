@@ -276,7 +276,7 @@ pub static SEGS: &[Seg] = &[
         draw: |x| {
             let installed = x.m.kept.peek::<State>().map_or(0, |s| s.installed);
             if of(x).info.is_some_and(|i| i.stale(installed)) {
-                return one(sp("older rush", YELLOW));
+                return one(sp("restart to update", YELLOW));
             }
             Line::new()
         },
@@ -734,13 +734,22 @@ fn rows_with(
                 state.spans.push(plain("   "));
                 join(&mut state, crate::away::away_chip(away, now(m), wide));
             }
-            // A name is often the whole first message; it's cut short so
-            // the state and what's on the right keep their room.
-            let room = 12.max(56.min(hw.saturating_sub(lead.len() + state.width()) / 2));
+            // The name has the row (Rust-only: Go cut it at 56, or half
+            // the row): the state stays, the bar on the right keeps room
+            // for a reading and drops its others first, and the handle
+            // goes before the name is cut.
+            const BAR: usize = 16;
+            let handle = name_handle(o.a);
+            let rest = hw.saturating_sub(lead.len() + 3 + state.width() + BAR);
+            let with = rest.saturating_sub(width(&handle.text) + 2);
+            let named = width(&full) <= with || handle.text.is_empty();
+            let room = 12.max(if named { with } else { rest });
             let name = rush_draw::truncate(&full, room, "…").into_owned();
             let mut l = line([plain(lead), spb(name, BRIGHT), plain("   ")]);
-            l.spans.push(name_handle(o.a));
-            l.spans.push(plain("  "));
+            if named {
+                l.spans.push(handle);
+                l.spans.push(plain("  "));
+            }
             join(&mut l, state);
             l
         }

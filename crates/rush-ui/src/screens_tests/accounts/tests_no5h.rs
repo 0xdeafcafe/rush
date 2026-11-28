@@ -362,3 +362,41 @@ fn auto_switch_with_mixed_accounts() {
     auto_switch(&mut m);
     assert_eq!(v.0.lock().unwrap()[0], "use alex");
 }
+
+/// The header counts the other accounts with nothing left rather than
+/// drawing each: which, and when it's back, is the accounts' to say.
+#[test]
+fn the_header_counts_the_accounts_at_their_limit() {
+    let gauge = |entries: &[String]| {
+        let (mut m, _, d) = model();
+        // Claude Code found on this machine: a program of its name.
+        let bin = d.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let p = bin.join("claude");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        m.reg = Registry::with_env(&bin.to_string_lossy(), &d.path().to_string_lossy());
+        m.reg.register(rush_claude::Claude::new());
+        rush_state::agents::use_thread_list();
+        let ls = read(d.path(), entries, "alsome");
+        for l in &ls {
+            cfg_mut(&mut m).logins.push(l.login.clone());
+        }
+        accounts(&mut m).logins = ls;
+        let g = crate::screens::bars::top::header_gauges(&m).expect("the calm header");
+        g.account.plain()
+    };
+    let got = gauge(&[
+        entry("alex", Some((true, 100.0, 2 * HOUR)), 40.0, 30 * HOUR),
+        entry("alsome", None, 60.0, 26 * HOUR),
+        entry("rogerio", Some((true, 0.0, 0)), 100.0, 100 * HOUR),
+    ]);
+    assert!(got.ends_with(" · 2 at limit"), "{got:?}");
+    // None of them out: no word of it. The one in use isn't counted.
+    let got = gauge(&[
+        entry("alex", Some((true, 90.0, 2 * HOUR)), 40.0, 30 * HOUR),
+        entry("alsome", None, 100.0, 26 * HOUR),
+    ]);
+    assert!(!got.contains("at limit"), "{got:?}");
+}
