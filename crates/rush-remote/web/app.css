@@ -234,6 +234,11 @@ pre .add, pre .del, pre .hunk { display: block; } pre .add { background: rgb(var
 .step-out.bad pre { color: rgb(var(--red)); }
 .path { color: rgb(var(--blue)); overflow-wrap: anywhere; }
 
+.step[data-sub] > summary::after { content: "›"; color: rgb(var(--dim)); margin-left: auto; padding-left: 1ch; }
+.subview { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; } .subview > .line { flex-wrap: nowrap; }
+#submount { height: min(64dvh, 46rem); background: rgb(var(--chrome) / .35); border: 1px solid rgb(var(--faint)); }
+.sublog { max-width: none; } .sublog .you { margin-top: 6px; }
+[data-state=failed] .mark { color: rgb(var(--red)); } .st-failed { color: rgb(var(--red)); }
 /* the dock: what waits on you, what's under way, and the box, by your thumb */
 .jump { position: absolute; right: var(--pad); z-index: 5; background: rgb(var(--sel)); color: rgb(var(--bright)); border: 1px solid rgb(var(--edge)); transform: translateY(calc(-100% - 8px)); }
 .jump[data-new]::before { content: "●"; color: rgb(var(--orange)); }
@@ -267,6 +272,8 @@ pre .add, pre .del, pre .hunk { display: block; } pre .add { background: rgb(var
 .pin-body li { display: flex; gap: 1ch; color: rgb(var(--dim)); align-items: center; }
 .pin-body li[data-s=completed] { color: rgb(var(--faint)); } .pin-body li[data-s=in_progress] { color: rgb(var(--text)); }
 .pin-body li .key { min-height: 28px; }
+.pin-btn { display: flex; gap: 1ch; align-items: center; padding: 4px 10px; min-height: calc(var(--tap) - 8px); text-align: left; color: rgb(var(--text)); }
+.pin-btn::after { content: "›"; color: rgb(var(--dim)); margin-left: auto; }
 .pin-queue { box-shadow: inset 2px 0 rgb(var(--queue)); }
 .composer .box { display: flex; align-items: flex-end; gap: 8px; border-color: rgb(var(--orange)); padding-bottom: 6px; }
 .composer .box > * + * { margin-top: 0; }
@@ -290,7 +297,7 @@ pre .add, pre .del, pre .hunk { display: block; } pre .add { background: rgb(var
 dialog::backdrop { background: rgb(0 0 0 / .55); }
 .sheet { background: rgb(var(--ground)); color: rgb(var(--text)); border-top: 1px solid rgb(var(--edge)); width: 100%; max-width: none; max-height: 88dvh; margin: auto 0 0; overflow-y: auto; overscroll-behavior: contain; }
 .sheet[open] { animation: rise .16s ease-out; }
-.sheet-body { padding: 12px 12px max(16px, var(--bottom)); display: grid; gap: 12px; }
+.sheet-body { padding: 12px 12px max(16px, var(--bottom)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .sheet-head { display: flex; align-items: center; gap: 1ch; position: sticky; top: 0; background: rgb(var(--ground)); z-index: 1; margin: -12px -12px 0; padding: 6px 6px 6px 12px; border-bottom: 1px solid rgb(var(--faint)); }
 .sheet-head h2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 640px) { .sheet { max-width: 34rem; border: 1px solid rgb(var(--edge)); margin: auto; } .sheet.big { max-width: min(64rem, 94vw); } }

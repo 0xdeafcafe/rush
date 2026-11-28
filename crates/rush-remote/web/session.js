@@ -38,7 +38,7 @@ function sessionScreen(id, full) {
   const asks = new Map();
 
   // S is what the conversation drawn so far has: a replay builds another
-  const blank = () => ({calls: new Map(), tasks: new Map(), todos: [], group: null, live: null, lastYou: null, said: false, steps: 0, at: 0, sentAt: 0, status: '', cmds: [], sents: []});
+  const blank = () => ({calls: new Map(), tasks: new Map(), subs: new Map(), agents: [], todos: [], group: null, live: null, lastYou: null, said: false, steps: 0, at: 0, sentAt: 0, status: '', cmds: [], sents: []});
   let S = blank(), into = log, re = null;
 
   // ── the end kept in view, once a frame ──
@@ -110,8 +110,7 @@ function sessionScreen(id, full) {
     const bg = [...S.tasks.values()].filter(t => !t.done), queue = info.queue || [];
     const h = (todos.length && done < todos.length ? `<details class=pin data-pin=plan><summary><span class=c-orange aria-hidden=true>■</span><span class=cut>${esc(doing ? doing.Active || doing.Label : 'plan')}</span><span class="c-dim num">${done}/${todos.length}</span></summary>
         <ul class=pin-body>${todos.map(t => `<li data-s="${esc(t.Status)}"><span aria-hidden=true>${t.Status === 'completed' ? '✓' : t.Status === 'in_progress' ? '▸' : '·'}</span><span>${esc(t.Label)}</span></li>`).join('')}</ul></details>` : '')
-      + (bg.length ? `<details class=pin data-pin=tasks><summary><span class=c-blue aria-hidden=true>⇉</span><span class=cut>${bg.length} in the background <span class=c-dim>· ${esc(bg[0].Label || bg[0].ID)}</span></span></summary>
-        <ul class=pin-body>${bg.map(t => `<li><span class="cut grow c-text">${esc(t.Label || t.ID)} <span class=c-dim>${esc(t.status || '')}</span></span><button class="key key-plain key-bad" data-t="${esc(t.ID)}">stop</button></li>`).join('')}</ul></details>` : '')
+      + (bg.length ? `<button class="pin pin-btn" data-works aria-label="${bg.length} running beside the turn: open them"><span class=c-blue aria-hidden=true>⇉</span><span class=cut>${bg.length} running <span class=c-dim>· ${esc(bg[0].Label || bg[0].ID)}${bg[0].status ? ' · ' + esc(bg[0].status) : ''}</span></span></button>` : '')
       + (queue.length ? `<details class="pin pin-queue" data-pin=queue><summary><span class=c-queue>⋯ queue ${queue.length}</span><span class="cut c-dim">${info.queueHeld ? 'held' : 'sends when this turn ends'} · ${esc(queue[0])}</span></summary>
         <ul class=pin-body>${queue.map((m, i) => `<li><span class="c-dim num">${i + 1}</span><span class="cut grow c-text">${esc(m)}</span><button class="key key-plain" data-q=${i}>now</button><button class="key key-plain key-bad" data-r=${i}>remove</button></li>`).join('')}</ul></details>` : '');
     if (h === stripped) return;
@@ -119,10 +118,16 @@ function sessionScreen(id, full) {
     $('#strip').innerHTML = stripped = h;
     $$('details', $('#strip')).forEach(d => { d.open = open.has(d.dataset.pin); });
   };
+  // the bar's ⇉ is there once anything has run beside the turn
+  const drawWorks = () => {
+    const b = $('#subs'), l = works(), run = l.filter(w => w.st === 'run').length;
+    if (b) { b.hidden = !l.length; set(b, '', `<span class="${run ? 'c-orange' : ''}">⇉</span>${run || l.length}`, true); }
+    drawSubs();
+  };
   $('#strip').onclick = e => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.t) op({op: 'stop_task', id: b.dataset.t});
+    if ('works' in b.dataset) return openSubs('');
     if (b.dataset.q) op({op: 'queue_send', index: +b.dataset.q, was: info.queue[b.dataset.q]});
     if (b.dataset.r) op({op: 'queue_remove', index: +b.dataset.r, was: info.queue[b.dataset.r]});
   };
@@ -287,11 +292,12 @@ function sessionScreen(id, full) {
     };
   };
   $('#modeb').onclick = details;
-  bar({title: esc(info.name || id), actions: [action('chg', 'changes', changes), action('info', '⋯', details, 'Details')]});
-  view.keys = {c: changes, i: details, e: () => box.focus(),
+  bar({title: esc(info.name || id), actions: [action('subs', '⇉', () => openSubs(''), 'Subagents and background work'), action('chg', 'changes', changes), action('info', '⋯', details, 'Details')]});
+  $('#subs').hidden = true;
+  view.keys = {c: changes, i: details, s: () => openSubs(''), e: () => box.focus(),
     'alt+KeyA': () => $('.ask [data-k=a]')?.click(), 'alt+KeyD': () => $('.ask [data-k=d]')?.click()};
   view.acts = [{name: 'Changes in this session', hint: 'c', run: changes}, {name: 'Details of this session', hint: 'i', run: details},
-    {name: 'Stop the turn', run: () => $('#halt').click()}, {name: 'New session in this folder', run: () => { newIn = info.cwd || ''; go('#/new'); }},
+    {name: 'Stop the turn', run: () => $('#halt').click()}, {name: 'Subagents and background work', hint: 's', run: () => openSubs('')}, {name: 'New session in this folder', run: () => { newIn = info.cwd || ''; go('#/new'); }},
     {name: 'Whole history of this session', run: () => go(sessionHash(id) + '/all')}];
 
   // ── a step: one tool call, folded to a line; a run of them, to one ──
@@ -311,7 +317,7 @@ function sessionScreen(id, full) {
     callSet(e, c);
     return e;
   };
-  const callSet = (e, c) => { set(e, '.what', callWhat(c)); set(e, '.more', callMore(c)); set(e, '.step-in', callBody(c), true); };
+  const callSet = (e, c) => { e._c = c; set(e, '.what', callWhat(c)); set(e, '.more', callMore(c)); set(e, '.step-in', callBody(c), true); };
   // sum says what a run of steps came to, on its one line
   const sum = g => {
     if (!g) return;
@@ -325,13 +331,15 @@ function sessionScreen(id, full) {
     set(g, '.steps-what', run.length ? $('.what', run[run.length - 1]).textContent : words);
     set(g, '.steps-n', `${plural(steps.length, 'step')}${bad ? ` · <em>${bad} failed</em>` : ''}`, true);
   };
-  const step = c => {
-    who();
-    if (!S.group) S.group = html('<div class=steps data-n=0><button class=steps-head aria-expanded=false><span class=steps-mark></span><span class=steps-what></span><span class=steps-n></span></button><div class=steps-list></div></div>');
+  // stepIn adds a call to a thread (the conversation, or a subagent's own): T keeps its run of steps and its calls
+  const stepIn = (T, box, c) => {
+    if (!T.group) { T.group = el('<div class=steps data-n=0><button class=steps-head aria-expanded=false><span class=steps-mark></span><span class=steps-what></span><span class=steps-n></span></button><div class=steps-list></div></div>'); box.append(T.group); }
     const s = callEl(c);
-    $('.steps-list', S.group).append(s); S.calls.set(c.ID, s); S.steps++;
-    sum(S.group); down();
+    $('.steps-list', T.group).append(s); T.calls.set(c.ID, s);
+    if (c.Name === 'Agent' || c.Name === 'Task') { S.agents.push(c.ID); s.dataset.sub = ''; }
+    sum(T.group);
   };
+  const step = c => { who(); stepIn(S, into, c); S.steps++; down(); };
   const finish = (s, bad) => { s.dataset.s = bad ? 'err' : 'ok'; set(s, '.step-mark', bad ? '✗' : '✓'); sum(s.closest('.steps')); };
   const output = (s, text, bad, more) => {
     const o = $('.step-out', s);
@@ -341,11 +349,17 @@ function sessionScreen(id, full) {
     o.classList.toggle('bad', !!bad);
     o.innerHTML = text ? `${cutAt ? `<div class=note>… ${cutAt} characters before this</div>` : ''}<pre>${esc(text.slice(cutAt))}</pre>` : '';
   };
-  log.onclick = e => {
+  // taps in a thread: a run of steps opens, a subagent's step opens its own thread, copy copies
+  const taps = e => {
     const h = e.target.closest('.steps-head');
     if (h) { const g = h.parentNode, o = g.toggleAttribute('data-open'); h.setAttribute('aria-expanded', o); return; }
+    const a = e.target.closest('.step[data-sub] > summary');
+    if (a) { e.preventDefault(); return openSubs(a.parentNode.dataset.id); }
     const c = e.target.closest('[data-say]');
     if (c) return copy(c.parentNode._raw || c.parentNode.textContent);
+  };
+  log.onclick = e => {
+    taps(e);
     if (e.target.closest('#earlier')) { earlier = {id, h: scroll.scrollHeight - scroll.scrollTop}; go(sessionHash(id) + '/all'); }
   };
 
@@ -368,6 +382,96 @@ function sessionScreen(id, full) {
     if (paints) return;
     paints = true;
     requestAnimationFrame(() => { paints = false; const l = S.live; if (l && l._dirty && sc.live) { l._dirty = false; l.innerHTML = md(l._s); down(); } });
+  };
+
+  // ── subagents, and what else runs beside the turn ──
+  // A message with a Parent was written by the subagent that tool call
+  // started. It's kept in that call's own thread, off the conversation, and
+  // shown when you open it: a tap on its step, the ⇉ in the bar, or the
+  // strip while it runs.
+  const subOf = id => {
+    let t = S.subs.get(id);
+    if (!t) { t = {id, el: el('<div class="log sublog"></div>'), group: null, calls: new Map(), said: 0}; S.subs.set(id, t); }
+    return t;
+  };
+  const subMessage = v => {
+    const t = subOf(v.Parent);
+    for (const p of v.Parts || []) {
+      if (p.Kind === 3 && p.Output) {
+        const o = p.Output, s = t.calls.get(o.CallID) || S.calls.get(o.CallID);
+        if (s) { const text = [o.Text || o.Stdout, o.Stderr].filter(Boolean).join('\n'); if (text) output(s, text, o.IsError); finish(s, o.IsError); }
+      } else if (p.Kind === 0 && p.Text && p.Text.trim()) {
+        t.group = null; t.said++;
+        t.el.append(v.Role === 'assistant' ? sayEl(p.Text) : el(`<div class=you><div class=you-head><b>${v.Injected ? 'told' : 'asked'}</b></div><div class=you-text>${esc(p.Text)}</div></div>`));
+      } else if (p.Kind === 2 && p.Call) stepIn(t, t.el, p.Call);
+    }
+    if (!re && subAt === t.id) subDown();
+  };
+  const anyCall = id => { let s = S.calls.get(id); if (!s) for (const t of S.subs.values()) if ((s = t.calls.get(id))) break; return s; };
+  const kinds = ['command', 'subagent', 'monitor', 'workflow', 'task'];
+  // works is everything that ran beside the turn: each subagent call, and each task that isn't one of them
+  const works = () => {
+    const out = [], seen = new Set(), tasks = [...S.tasks.values()];
+    for (const id of S.agents) {
+      const s = anyCall(id), t = tasks.find(t => t.CallID === id), i = (s && s._c.Input) || {};
+      if (t) seen.add(t.ID);
+      out.push({id, task: t, kind: 'subagent', label: (t && t.Label) || i.Description || 'subagent', agent: (t && t.Agent) || i.Agent || '', st: t ? (t.done ? (t.bad ? 'err' : 'ok') : 'run') : (s && s.dataset.s) || 'ok', sub: S.subs.get(id), step: s});
+    }
+    for (const t of tasks) if (!seen.has(t.ID)) out.push({id: t.CallID || t.ID, task: t, kind: t.KindWord || kinds[t.Kind] || 'task', label: t.Label || t.ID, agent: t.Agent || '', st: t.done ? (t.bad ? 'err' : 'ok') : 'run', sub: S.subs.get(t.CallID), step: anyCall(t.CallID)});
+    return out.sort((a, b) => (a.st === 'run' ? 0 : 1) - (b.st === 'run' ? 0 : 1));
+  };
+  let subSheet = null, subAt = '', subbed = '';
+  const subDown = () => { const m = subSheet && $('#submount', subSheet); if (m && m._stick !== false) requestAnimationFrame(() => { m.scrollTop = m.scrollHeight; }); };
+  const openSubs = at => {
+    subAt = at;
+    if (!subSheet) {
+      subSheet = sheet('<div id=subbody></div>', {title: 'Beside the turn', big: true});
+      subSheet.addEventListener('close', () => { subSheet = null; subAt = ''; subbed = ''; });
+      subSheet.addEventListener('click', async e => {
+        taps(e);
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.w !== undefined) openSubs(b.dataset.w);
+        if ('back' in b.dataset) openSubs('');
+        if (b.dataset.halt) { b.disabled = true; if (!await op({op: 'stop_task', id: b.dataset.halt})) b.disabled = false; }
+      });
+      subSheet.addEventListener('submit', async e => {
+        e.preventDefault();
+        const i = $('input', e.target), w = works().find(w => w.id === subAt);
+        if (!i.value.trim() || !w || !w.task) return;
+        if (await op({op: 'tell', id: w.task.ID, text: i.value.trim()})) { toast('told ' + w.label); i.value = ''; }
+      });
+    }
+    subbed = ''; drawSubs();
+  };
+  const markOf = st => st === 'run' ? '✻' : st === 'err' ? '✗' : '✓';
+  const stateOfWork = st => st === 'run' ? 'working' : st === 'err' ? 'failed' : 'idle';
+  const drawSubs = () => {
+    if (!subSheet) return;
+    const body = $('#subbody', subSheet), l = works(), w = subAt && l.find(w => w.id === subAt);
+    if (!w) {
+      // the list: what runs first
+      const h = l.length ? l.map(w => `<button class=row data-w="${esc(w.id)}" data-state=${stateOfWork(w.st)}><div class=row-link><div class=row-top><span class=mark aria-hidden=true>${markOf(w.st)}</span><b>${esc(w.label)}</b><span class=cost>${w.task && w.task.uses ? plural(w.task.uses, 'step') : ''}${w.task && w.task.tokens ? ' · ' + tokens(w.task.tokens) : ''}</span></div>
+        <div class=row-sub><span class=tree aria-hidden=true>└</span><span class=why>${esc([w.agent || w.kind, w.st === 'run' ? (w.task && w.task.status) || 'running' : w.st === 'err' ? 'failed' : 'done'].filter(Boolean).join(' · '))}</span></div></div></button>`).join('')
+        : '<div class=empty><p>Nothing has run beside the turn: no subagents, no background commands.</p></div>';
+      if (h !== subbed) body.innerHTML = subbed = h;
+      return;
+    }
+    const tell = w.st === 'run' && w.kind === 'subagent' && info.inbox && w.task;
+    const h = `${w.id}|${w.st}|${w.label}|${(w.task && w.task.status) || ''}|${!!tell}|${!!w.sub}`;
+    if (h !== subbed) {
+      subbed = h;
+      body.innerHTML = `<div class=subview><div class=line><button class="key key-plain" data-back aria-label="All of them">‹ all</button><span class="grow cut"><span class="st-${stateOfWork(w.st)}">${markOf(w.st)}</span> <b>${esc(w.label)}</b> <span class=c-dim>${esc([w.agent || w.kind, w.st === 'run' && w.task && w.task.status].filter(Boolean).join(' · '))}</span></span>
+        ${w.st === 'run' && w.task ? `<button class="key key-bad" data-halt="${esc(w.task.ID)}">■ stop</button>` : ''}</div>
+        <div id=submount class=scroller></div>
+        ${tell ? '<form class=line><input class="field grow" placeholder="Tell it something" aria-label="Tell this subagent" enterkeyhint=send><button class="key key-on">tell</button></form>' : ''}</div>`;
+      const m = $('#submount', body), i = (w.step && w.step._c.Input) || {}, out = w.step && $('.step-out', w.step);
+      // its own thread; or for one with none (a command, an agent that doesn't say), what it was asked and what came back
+      m.replaceChildren(w.sub ? w.sub.el : el(`<div class="log sublog">${i.Prompt || i.Command ? `<div class=you><div class=you-head><b>${i.Command ? 'ran' : 'asked'}</b></div><div class=you-text>${esc(i.Command || i.Prompt)}</div></div>` : ''}${
+        out && out._t ? `<div class=say><pre class=wrap>${esc(out._t.slice(-OUT_MOST))}</pre></div>` : `<p class=aside>${w.st === 'run' ? 'Nothing from it yet.' : 'It left nothing to show.'}</p>`}</div>`));
+      m.onscroll = () => { m._stick = m.scrollHeight - m.scrollTop - m.clientHeight < 80; };
+      subDown();
+    }
   };
 
   // ── what waits on you ──
@@ -469,6 +573,7 @@ function sessionScreen(id, full) {
   };
 
   // ── the stream ──
+  const works_ = () => { if (!re) { drawStrip(); drawWorks(); } };
   const replay = () => {
     if (re) clearTimeout(re.t);
     else re = {was: S, stick, top: scroll.scrollTop, at: Date.now()};
@@ -487,14 +592,14 @@ function sessionScreen(id, full) {
     if (into.innerHTML === log.innerHTML) {
       // the same conversation: what's drawn stays, with what the replay learnt beside it
       const now = S;
-      S = was.was; S.tasks = now.tasks; S.todos = now.todos; S.cmds = now.cmds.length ? now.cmds : S.cmds; S.status = now.status; S.sentAt = now.sentAt || S.sentAt;
+      S = was.was; S.tasks = now.tasks; S.subs = now.subs; S.agents = now.agents; S.todos = now.todos; S.cmds = now.cmds.length ? now.cmds : S.cmds; S.status = now.status; S.sentAt = now.sentAt || S.sentAt;
     } else log.replaceChildren(...into.childNodes);
     into = log;
     asks.forEach((a, k) => { if ('stale' in a.dataset) { a.remove(); asks.delete(k); } });
     stick = was.stick;
     if (earlier && earlier.id === id && full) { scroll.scrollTop = scroll.scrollHeight - earlier.h; earlier = null; stick = atEnd(); }
     else if (stick) bottom(); else scroll.scrollTop = was.top;
-    drawJump(); head();
+    subbed = ''; drawJump(); head(); drawWorks();
   };
   const es = new EventSource(base + `/api/sessions/${enc(id)}/events` + (full ? '?full=1' : ''));
   sc.on(() => { es.close(); if (re) clearTimeout(re.t); });
@@ -524,7 +629,7 @@ function sessionScreen(id, full) {
         } else if (v.Kind === 1 && !S.status) { S.status = 'thinking'; head(); }
         break;
       case 'message':
-        if (v.Parent) break;
+        if (v.Parent) { subMessage(v); drawWorks(); break; }
         if (v.Role === 'assistant') {
           for (const p of v.Parts || []) {
             if (p.Kind === 0 && p.Text.trim()) {
@@ -554,10 +659,21 @@ function sessionScreen(id, full) {
         if (!re) buzz(60);
       } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;
-      case 'task_started': S.tasks.set(v.ID, v); drawStrip(); break;
-      case 'task_updated': case 'task_done': { const t = S.tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; if (v.Label) t.Label = v.Label; S.tasks.set(v.ID, t); drawStrip(); } break;
-      case 'task_progress': { const t = S.tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool; drawStrip(); } } break;
-      case 'background': { const ids = new Set((v.Tasks || []).map(t => t.ID)); S.tasks.forEach((t, k) => { if (!ids.has(k)) t.done = true; }); (v.Tasks || []).forEach(t => { if (!S.tasks.has(t.ID)) S.tasks.set(t.ID, t); }); drawStrip(); } break;
+      case 'task_started': S.tasks.set(v.ID, {...S.tasks.get(v.ID), ...v}); works_(); break;
+      case 'task_updated': case 'task_done': {
+        const t = S.tasks.get(v.ID) || {ID: v.ID};
+        if (v.Status) { t.done = true; t.bad = /fail|error|kill/i.test(v.Status) || !!v.Err; }
+        if (v.Label) t.Label = v.Label;
+        if (v.CallID) t.CallID = v.CallID;
+        S.tasks.set(v.ID, t); works_();
+      } break;
+      case 'task_progress': { const t = S.tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool || t.status; t.uses = v.ToolUses || t.uses; t.tokens = v.Tokens || t.tokens; works_(); } } break;
+      case 'background': {
+        const ids = new Set((v.Tasks || []).map(t => t.ID));
+        S.tasks.forEach((t, k) => { if (!ids.has(k) && t.Background !== false) t.done = true; });
+        (v.Tasks || []).forEach(t => { if (!S.tasks.has(t.ID)) S.tasks.set(t.ID, t); });
+        works_();
+      } break;
       case 'plan': S.todos = v.Todos || []; drawStrip(); break;
       case 'commands': S.cmds = v.List || []; break;
       case 'status': S.status = v.Busy ? v.Text || '' : ''; head(); break;
