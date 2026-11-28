@@ -1214,18 +1214,20 @@ fn prompt_pins() {
     assert_eq!(v.sel, "t26");
     let s = screen(&mut m);
     // Its turn from the top: its blank first row, then its "You" heading,
-    // right under the two pins (the one over it is the question before).
+    // right under the two pins (the one over it is the question before)
+    // and the rule that closes them off.
     assert!(
         s[top + 1].starts_with("  ▍ current question 24"),
         "{:#?}",
-        &s[top..top + 6]
+        &s[top..top + 7]
     );
-    assert!(s[top + 2].trim().is_empty() || s[top + 2].trim().starts_with('│'));
-    assert!(s[top + 3].contains("You"), "{:#?}", &s[top..top + 6]);
+    assert!(s[top + 2].starts_with("  ────"), "{:#?}", &s[top..top + 7]);
+    assert!(s[top + 3].trim().is_empty() || s[top + 3].trim().starts_with('│'));
+    assert!(s[top + 4].contains("You"), "{:#?}", &s[top..top + 7]);
     assert!(
-        s[top + 4].contains("question 25"),
+        s[top + 5].contains("question 25"),
         "{:#?}",
-        &s[top..top + 6]
+        &s[top..top + 7]
     );
 }
 
@@ -1252,18 +1254,48 @@ fn pane_for(body: usize) -> usize {
 }
 
 /// A jump to a pinned prompt lands the turn's first row just below the top
-/// pins that show there: none, one or two. Each case: the pane's height, the
-/// turn jumped to, how many pins sit over it, and the question it shows.
+/// pins that show there, none, one or two, and the rule under them (a
+/// pane of ten rows or more). Each case: the pane's height, the turn
+/// jumped to, how many pins sit over it, whether a rule closes them off,
+/// and the question it shows.
 #[test]
 fn prompt_jump_lands_below_the_pins() {
-    let cases: [(&str, usize, u32, usize, &str); 5] = [
-        ("the first turn: no pins over it", 36, 1, 0, "question 0"),
-        ("the second: only the first pin", 36, 2, 1, "question 1"),
-        ("a later one: two pins", 36, 14, 2, "question 13"),
-        ("a short pane: one pin", pane_for(9), 14, 1, "question 13"),
-        ("a shorter one: none", pane_for(6), 14, 0, "question 13"),
+    let cases: [(&str, usize, u32, usize, bool, &str); 5] = [
+        (
+            "the first turn: no pins over it",
+            36,
+            1,
+            0,
+            false,
+            "question 0",
+        ),
+        (
+            "the second: only the first pin",
+            36,
+            2,
+            1,
+            true,
+            "question 1",
+        ),
+        ("a later one: two pins", 36, 14, 2, true, "question 13"),
+        (
+            "a short pane: one pin",
+            pane_for(9),
+            14,
+            1,
+            false,
+            "question 13",
+        ),
+        (
+            "a shorter one: none",
+            pane_for(6),
+            14,
+            0,
+            false,
+            "question 13",
+        ),
     ];
-    for (name, h, n, pins, want) in cases {
+    for (name, h, n, pins, ruled, want) in cases {
         let fake = Fake::new();
         let mut m = open(agent("steer", State::Idle), &fake, 123, h);
         long(&mut m, 30);
@@ -1283,6 +1315,12 @@ fn prompt_jump_lands_below_the_pins() {
             );
         }
         let rows = &s[top..top + 6];
+        assert_eq!(
+            s[top + pins].starts_with("  ────"),
+            ruled,
+            "{name}: {rows:#?}"
+        );
+        let pins = pins + usize::from(ruled);
         assert!(!s[top + pins].starts_with("  ▍ "), "{name}: {rows:#?}");
         assert!(s[top + pins + 1].contains("You"), "{name}: {rows:#?}");
         assert!(s[top + pins + 2].contains(want), "{name}: {rows:#?}");

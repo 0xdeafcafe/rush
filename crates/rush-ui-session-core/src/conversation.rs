@@ -473,9 +473,22 @@ pub(super) fn cursor_mark(l: &mut Line, keys: bool) {
 // What a pinned row's ref starts with is the base's (crate::sess).
 pub use crate::sess::PIN_REF;
 
-/// Whether turn t began with something you said (yourPrompt).
+/// Whether turn t began with something you said (yourPrompt): what you
+/// typed only, not a prompt rush sent for you (Emeritus's nudge, "moved
+/// to an account with room"), which Go's pinned as yours.
 fn your_prompt(t: &rush_convo::Turn) -> bool {
-    t.from.is_empty() && !t.prompt.trim().is_empty()
+    rush_convo::render::yours(t)
+}
+
+/// The fewest rows a pane has for the pins at its top to get a rule
+/// under them.
+const RULED_FROM: usize = 10;
+
+/// How many rows the pins at the top take with the view at row start, h
+/// rows tall: the pins and, from RULED_FROM rows, the rule under them.
+pub fn top_pin_rows(v: &crate::session::SessionView, start: usize, h: usize) -> usize {
+    let n = pin_plan(v, start, h).iter().filter(|p| p.0 < 2).count();
+    if n > 0 && h >= RULED_FROM { n + 1 } else { n }
 }
 
 /// Prompts pinned over the body so you can find your way while scrolling
@@ -555,12 +568,19 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize, pre
         let row = line([
             sp("▍", BLUE),
             plain(" "),
-            sp(label, FAINT),
+            sp(label, DIM),
             plain(" "),
             sp(text, TEXT),
         ]);
         b[y] = on_ground(fit(row, pw), pw, CHROME_BG);
         refs.push((y, format!("{PIN_REF}t{}", t.n)));
+    }
+    // A rule closes the pins at the top off from the conversation under
+    // them: on the chrome's ground alone they read as its first rows.
+    let tops = refs.iter().filter(|(y, _)| *y < 2).count();
+    if tops > 0 && h >= RULED_FROM {
+        b[tops] = fit(line([sp("─".repeat(pw), FAINT)]), pw);
+        refs.push((tops, String::new()));
     }
     for (y, r) in refs {
         if v.shown.len() <= y {

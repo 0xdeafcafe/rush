@@ -359,7 +359,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         }
     }
     // Not beside "Views 3", where "[ ] views" would read as its keys.
-    let hint = line([sp("   [ ]", DIM), sp(" views", FAINT)]);
+    let hint = line([sp("   [ ]", DIM), sp(" views", DIM)]);
     if views_chip == (0, 0) && strip.width() + hint.width() <= hw.saturating_sub(chips.width() + 2)
     {
         join(&mut strip, hint);

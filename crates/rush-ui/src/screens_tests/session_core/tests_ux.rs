@@ -572,3 +572,82 @@ fn another_worktrees_files_arent_the_projects() {
         assert_eq!(mine(root, dir, path), want, "{root} {dir} {path}");
     }
 }
+
+/// A turn is found by its header: who answered and when, that it woke
+/// itself (no row of its own for that), and what the turn came to, on
+/// the right edge the steps' times keep. The session's own @handle isn't
+/// said on every turn.
+#[test]
+fn a_turns_header_says_what_it_came_to() {
+    let mut m = busy(200, 56);
+    let f = drawn(&mut m);
+    let rows: Vec<&str> = f.lines().collect();
+    let head = |what: &str| {
+        *rows
+            .iter()
+            .find(|r| r.contains(what))
+            .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
+    };
+    let first = head("2 steps · 22m 01s · $1.10");
+    assert!(first.contains("▍ Agent  12:54"), "{first}");
+    let woke = head("Agent  13:24 · woke itself");
+    assert!(woke.contains("5 steps · 1m 01s · $0.79"), "{woke}");
+    assert!(!f.contains("woke up without a message"), "{f}");
+    // The turn under way has no totals yet: the live line has its time.
+    let live = head("Agent  13:34");
+    assert!(!live.contains("step"), "{live}");
+    // One right edge: the totals end where a step's time does.
+    let edge = |row: &str, what: &str| {
+        rush_core::text::width(&row[..row.find(what).unwrap() + what.len()])
+    };
+    assert_eq!(
+        edge(first, "$1.10"),
+        edge(head("20m 37s"), "20m 37s"),
+        "{f}"
+    );
+    // Not after every turn's time, as it was.
+    assert_eq!(
+        f.matches("@drive-faster").count(),
+        1,
+        "the header's alone:\n{f}"
+    );
+}
+
+/// A step that failed keeps a row of its own in a finished turn, red
+/// down its edge, with the line that says what went wrong; the steps
+/// round it still fold.
+#[test]
+fn a_failed_step_stands_out() {
+    use rush_core::text::Color;
+    let mut m = busy(200, 56);
+    let _ = drawn(&mut m);
+    let lines = m.frame();
+    let at = lines
+        .iter()
+        .position(|l| {
+            l.plain()
+                .contains("✗ Clippy, push, rebuild, boot all three")
+        })
+        .expect("the failed step's row");
+    let row = lines[at].plain();
+    assert!(row.contains("20m 37s"), "{row}");
+    let err = lines[at + 1].plain();
+    assert!(
+        err.contains("error: collision: location: float (03a_oldmombasa boot)"),
+        "{err}"
+    );
+    for l in &lines[at..at + 2] {
+        let edge = l
+            .spans
+            .iter()
+            .find(|s| s.text.contains('▍'))
+            .unwrap_or_else(|| panic!("no edge: {:?}", l.plain()));
+        assert_eq!(edge.style.fg, Color::Rgb(224, 104, 92), "{:?}", l.plain());
+    }
+    let f = drawn(&mut m);
+    assert!(!f.contains("1 failed"), "not folded among the rest:\n{f}");
+    assert!(
+        f.contains("✓ read 3 files, searched 2 times · 5 steps"),
+        "{f}"
+    );
+}

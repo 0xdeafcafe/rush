@@ -578,9 +578,10 @@ impl SessionView {
                     // there: the fewest rows up that hold that many.
                     let row = self.r.turn_row(i);
                     let tops = |s: usize| TOP_PINS.get().map_or(0, |f| f(self, s, rows));
-                    let k = (0..=2)
+                    // Two pins and the rule under them, at most.
+                    let k = (0..=3)
                         .find(|&k| tops(row.saturating_sub(k)) <= k)
-                        .unwrap_or(2);
+                        .unwrap_or(3);
                     (row.saturating_sub(k) + off).min(max)
                 }
                 Some(i) => (self.r.turn_row(i) + off).min(max),

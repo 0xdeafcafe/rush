@@ -4413,6 +4413,37 @@ at):
   click there bringing their list up as the part's head did; the
   "[ ] views" hint isn't said beside it. Views it has now, folded, are
   still the column's last part, each with what it says of itself.
+- **A turn is found by its header** (`render::draw speaker`). The row
+  that names the agent says, after its time, that the turn woke itself
+  (it was a row of its own above, "◌ woke up without a message", then a
+  gap), and on its right, once the turn is over, what it came to: "12
+  steps · 2m 05s · $1.10", which was a row after the turn's last words.
+  The totals end on the right edge the steps' times keep. The agent's
+  name is bold in the text's colour, not orange. The session's own
+  @handle is no longer said after the time on every turn
+  (`Options::agent`, still set): the header has it once, and on a turn's
+  row it was the first thing cut ("@drive-faster-coordinat…").
+- **A step that failed stands out** (`batched`, `step`). In a finished
+  turn it doesn't fold into the row of steps round it ("read 3 files,
+  cargo clippy · 5 steps · 1 failed"): it keeps its own row, its edge
+  red down its rows (▍ in place of the steps' │), with the line of its
+  output that says what went wrong under it (`error_line`, as a failed
+  step not opened always had).
+- **The prompts pinned over a scrolled conversation are yours**
+  (`render::yours`, `conversation::pin_plan`): not one rush sent for
+  you (Emeritus's nudge, "moved to an account with room"), which Go
+  pinned as "first" or "latest". From ten rows a rule closes the pins
+  at the top off from the rows under them (`top_pin_rows`; a jump to a
+  pinned prompt lands under it).
+- **Colour.** Orange is for what runs now: the agent's name on a turn is
+  bold text, "◇ context compacted" is dim, not bright blue. The
+  conversation's faint tier is (108, 102, 94), up from Go's (94, 89,
+  82), under 3:1 on the ground (`render::style C_FAINT`,
+  `theme::convo_faint`). The UI's own faint (72, 68, 63) stays: the
+  frames set beside Go's compare colours cell by cell
+  (`screens_tests/plugin_ui/wide.rs`), so it can't move without them;
+  labels on the session screen that were drawn in it are dim instead
+  (the pins' "first"/"latest", "[ ] views", "+N more").
 
 ## Conversation views (Rust-only)
 

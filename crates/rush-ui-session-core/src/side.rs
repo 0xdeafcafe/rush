@@ -306,7 +306,7 @@ pub fn tasks(s: &Session, w: usize) -> Vec<Line> {
     }
     let more = s.tasks.len() - to;
     if more > 0 {
-        out.push(line([faint(format!("   +{more} more"))]));
+        out.push(line([dim(format!("   +{more} more"))]));
     }
     out
 }

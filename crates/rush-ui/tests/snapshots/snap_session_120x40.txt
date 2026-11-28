@@ -13,11 +13,11 @@
 ┃ Working  2 · $5.72             │  ▍ You  12:00
 ┃ ├─ ✳ add Apple Pa… ✻ ↳1    21m │  ▍ fix the test
 ┃ │    checkout · feat/apple-pay │
-┃ └─ ✳ move the design… ✻    20m │    Claude  12:00 · @set-up-caching-for-ci
+┃ └─ ✳ move the design… ✻    20m │    Claude  12:00                                                      1 step · 13s
 ┃      checkout · main           │      ✓ cargo test                                                               7s
                                  │
 ┃ Idle  1 · $1.10 · 120M idle ram│    Fixed it.
-▌ └─ ◦ set… ✻ Claude Code    10m │                                                                       1 step   13s
+▌ └─ ◦ set… ✻ Claude Code    10m │
 ▌      checkout · main           │
                                  │
 ┃ Today  1 · $1.71               │
