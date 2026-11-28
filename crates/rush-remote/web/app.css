@@ -131,3 +131,29 @@
 .sublog{max-height:60dvh;overflow-y:auto;overscroll-behavior:contain}
 .sublog .say,.sublog .step{padding-left:0;padding-right:0}
 @media (min-width:40rem){#subagent.sheet{max-width:min(56rem,94vw)}}
+/* the look picked in devices, over the system's */
+:root[data-theme=dark]{color-scheme:dark;--ground:17 17 17;--chrome:30 28 26;--hover:33 31 29;--sel:44 40 36;--input:40 36 32;--edge:79 73 67;--bright:240 236 228;--text:226 221 211;--sub:168 162 152;--dim:122 117 108;--faint:72 68 63;--orange:217 119 87;--yellow:229 181 103;--blue:143 179 217;--green:127 191 138;--red:224 104 92;--queue:178 160 214;--you:34 25 24;--ask:44 38 24;--err:46 28 26;--tab:79 35 20}
+:root[data-theme=light]{color-scheme:light;--ground:250 248 244;--chrome:240 236 229;--hover:236 231 223;--sel:228 222 212;--input:255 255 255;--edge:200 192 180;--bright:20 18 16;--text:40 36 32;--sub:92 86 78;--dim:128 120 110;--faint:180 172 160;--orange:196 88 52;--yellow:168 118 20;--blue:52 104 168;--green:46 140 74;--red:196 60 46;--queue:112 88 170;--you:250 232 224;--ask:250 240 214;--err:252 228 224;--tab:250 222 208}
+/* for a thumb: quick replies, who else waits, a message's own actions, dictation */
+.quick{display:flex;gap:calc(var(--spacing)*1.5);overflow-x:auto;scrollbar-width:none;padding-bottom:calc(var(--spacing)*1.5)}
+.quick .key{flex-shrink:0;font-size:13px}
+.notice{display:flex;align-items:center;gap:calc(var(--spacing)*2);background-color:var(--color-ask);color:var(--color-yellow);padding:var(--spacing) calc(var(--spacing)*1) var(--spacing) calc(var(--spacing)*3);margin-bottom:calc(var(--spacing)*1.5)}
+.notice .key{height:calc(var(--spacing)*7);flex-shrink:0}
+.say{position:relative}
+.msg-more{color:var(--color-dim);padding-inline:calc(var(--spacing)*2);line-height:1.2;flex-shrink:0}
+.say>.msg-more{position:absolute;top:0;right:0;margin-top:0}
+.you>.msg-more{margin-left:auto;align-self:flex-start}
+@media (hover:hover) and (pointer:fine){.msg-more{opacity:0}.say:hover>.msg-more,.you:hover>.msg-more,.msg-more:focus-visible{opacity:1}}
+@media (hover:none){.say{padding-right:calc(var(--spacing)*8)}}
+.msg-clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg-acts{display:grid;gap:calc(var(--spacing)*1.5);padding-top:calc(var(--spacing)*2)}
+.msg-acts .key{height:calc(var(--spacing)*10)}
+.composer[data-hear] .box{border-color:var(--color-red)}
+.composer[data-hear] .prompt{color:var(--color-red);animation:breathe 1s ease-in-out infinite}
+/* the palette */
+.pall{max-height:50dvh;overflow-y:auto;padding-top:calc(var(--spacing)*2)}
+.pall button{display:flex;gap:calc(var(--spacing)*2);align-items:center;width:100%;text-align:left;padding:calc(var(--spacing)*1.5) calc(var(--spacing)*2);min-width:0}
+.pall button>*{flex-shrink:0}.pall button>b.truncate{max-width:65%}.pall button>span.truncate{flex:1;min-width:0}
+.tab{white-space:nowrap}
+.pall button[aria-selected=true]{background-color:var(--color-sel)}
+@media (min-width:40rem){#palette.sheet{margin-top:12dvh}}

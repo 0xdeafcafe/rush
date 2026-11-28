@@ -37,6 +37,16 @@ const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {
 const copy = async (text, what = 'copied') => {
   try { await navigator.clipboard.writeText(text); toast(what); } catch { toast("This browser won't let the page copy.", 'bad'); }
 };
+// the look: the system's, or the one picked in devices (kept in this browser)
+const theme = t => {
+  if (t !== undefined) store.set('theme', t);
+  const v = store.get('theme', '');
+  if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+  const dark = v ? v === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  $$('meta[name=theme-color]').forEach(m => m.content = dark ? '#161514' : '#f7f4ee');
+  return v;
+};
+theme();
 // what happened to the session's shell commands, while the page lives
 const shellRuns = new Map();
 
@@ -380,7 +390,7 @@ function homeScreen() {
     acts.push(s);
   }
   if ('PushManager' in window) acts.push(action('bell', 'notify', subscribe));
-  acts.push(action('fleet', 'fleet', () => go('#/fleet')), action('devs', 'devices', () => go('#/devices')), action('new', '<span class=text-orange>+</span> new', () => go('#/new')));
+  acts.push(action('find', 'find', palette), action('fleet', 'fleet', () => go('#/fleet')), action('devs', 'devices', () => go('#/devices')), action('new', '<span class=text-orange>+</span> new', () => go('#/new')));
   bar({title: machines.length > 1 ? esc(machine) : 'rush', actions: acts});
   $('#main').innerHTML = `<div id=list>${'<div class=row><div class="skeleton h-4 w-2/3 my-0.5"></div><div class="skeleton h-3 w-1/3 ml-[2ch] mt-1.5"></div></div>'.repeat(3)}</div><div id=oth></div>`;
   const draw = l => {
@@ -458,7 +468,8 @@ function newScreen() {
 function devicesScreen() {
   const sc = newScope();
   bar({title: 'devices', sub: 'paired with ' + esc(machine), back: true});
-  $('#main').innerHTML = `<div class=rule><b>▾ Paired</b><span id=devn></span></div><div id=devlist></div>
+  $('#main').innerHTML = `<div class="px-3 pt-2"><fieldset class=box><legend>appearance on this device</legend><div class="flex flex-wrap gap-1.5 pt-1" id=looks>${[['', 'as the system'], ['dark', 'dark'], ['light', 'light']].map(([v, w]) => `<button class="key${theme() === v ? ' key-on' : ''}" data-look="${v}">${w}</button>`).join('')}</div></fieldset></div>
+    <div class=rule><b>▾ Paired</b><span id=devn></span></div><div id=devlist></div>
     <p class="px-3 py-3 text-dim">Pair another in rush on that machine: Settings › Remote › Pair a device. A phone scans its code; an SSH app types it when asked.</p>
     <div class="px-3 pb-10"><button class="key key-bad" id=signout>sign out of this device</button></div>`;
   const load = () => api('/devices').then(r => r.json()).then(l => {
@@ -486,6 +497,7 @@ function devicesScreen() {
     try { await post(`/devices/${encodeURIComponent(b.dataset.revoke)}/revoke`, {}); if (self) return location.replace(location.pathname); load(); toast('unpaired ' + name); }
     catch (err) { failed(err); }
   };
+  $('#looks').onclick = e => { const b = e.target.closest('[data-look]'); if (!b) return; theme(b.dataset.look); $$('#looks .key').forEach(x => x.classList.toggle('key-on', x === b)); };
   $('#signout').onclick = async () => {
     if (!await confirmSheet('sign out', "You'll need a new pairing code, or the token, to sign in again.", 'sign out', true)) return;
     if (me) await post(`/devices/${encodeURIComponent(me)}/revoke`, {}).catch(() => {});
@@ -621,17 +633,17 @@ function sessionScreen(id, init) {
   $('#main').innerHTML = `<button id=jump class="key key-plain jump hidden" aria-label="to the newest">↓</button>
     <nav class=tabs id=tabs aria-label="this session"><button class=tab data-t=c>conversation</button><button class=tab data-t=agents>agents</button><button class=tab data-t=shells>shells</button><button class=tab data-t=changes>changes</button><button class=tab data-t=overview>overview</button></nav>
     <div id=log class="pt-1"></div><div id=asks></div><div id=tabpane class="px-3 pt-2 hidden"></div>
-    <div class=composer id=composer><div id=pics class=chips></div>
+    <div class=composer id=composer><div id=notices></div><div id=quick class="quick hidden" aria-label="quick replies"></div><div id=pics class=chips></div>
       <fieldset class=box><legend></legend><span class=prompt>❯</span><textarea id=txt rows=1 placeholder="message for this agent" enterkeyhint=send></textarea><button class="key key-on h-7" id=send>send</button></fieldset>
       <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
-        <button id=shb title="run a command in this session's folder; or start a message with !"><b>shell</b></button><span class=sep>·</span>
+        <button id=mic class=hidden aria-pressed=false title="say it: dictation into the message box"><b>mic</b></button><span class="sep hidden" id=micsep>·</span><button id=shb title="run a command in this session's folder; or start a message with !"><b>shell</b></button><span class=sep>·</span>
         <button id=steer title="into the turn under way"><b>steer</b></button><span class=sep>·</span><button id=halt class=text-red>stop</button><span class=sep>·</span><button id=chg><b>changes</b></button></div></div>`;
   head();
   onList = l => {
     const x = l.find(i => i.id === id);
     if (!x || !sc.live) return;
     const k = i => [i.name, i.state, i.alive, i.needs, i.model, i.cwd].join('\u0000');
-    if (k(x) !== k(info)) { info = {...info, ...x}; head(); }
+    if (k(x) !== k(info)) { info = {...info, ...x}; head(); tabTally(); }
   };
   sc.on(() => { onList = null; });
   // the conversation stays clear of the box, whatever its height
@@ -660,7 +672,73 @@ function sessionScreen(id, init) {
   const box = $('#txt');
   const grow = () => { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 160) + 'px'; };
   const bang = () => { const on = box.value[0] === '!'; $('#composer').toggleAttribute('data-bang', on); $('#send').textContent = on ? 'run' : 'send'; };
-  box.oninput = () => { grow(); bang(); };
+  // a draft is this browser's until it's sent: it outlives the tab, and a dead connection
+  const draftKey = 'draft.' + machine + '/' + id;
+  const typed = () => { store.set(draftKey, box.value); grow(); bang(); drawQuick(); };
+  box.value = store.get(draftKey, '');
+  box.oninput = typed;
+
+  // quick replies: an answer without the keyboard. For a thumb, when the
+  // agent has said its piece and waits on nothing but your word: a tap puts
+  // one in the box, to send or add to. Short things you've said here join them.
+  const sents = [];
+  let lastWho = '', quicked = '';
+  const drawQuick = () => {
+    const q = $('#quick'), st = stateOf({...info, alive: info.alive ?? true});
+    const show = !fine.matches && !box.value && !pics.length && st === 'idle' && !asks.size && !decEl && lastWho === 'agent';
+    const mine = [...new Set(sents.slice().reverse().filter(t => t.length <= 16 && !t.includes('\n') && !/^[!\/]/.test(t)))].slice(0, 3);
+    const h = show ? [...new Set(['continue', 'yes', 'no', ...mine, 'explain that', 'run the tests', 'commit it'])].map(t => `<button class=key data-t="${esc(t)}">${esc(t)}</button>`).join('') : '';
+    q.classList.toggle('hidden', !h);
+    if (h !== quicked) q.innerHTML = quicked = h;
+  };
+  $('#quick').onclick = e => { const b = e.target.closest('[data-t]'); if (b) { box.value = b.dataset.t; typed(); buzz(8); } };
+
+  // dictation, where the browser has it: what you say lands in the box as you say it
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  const hear = on => { $('#mic').setAttribute('aria-pressed', on); $('#mic').innerHTML = on ? '<span class=text-red>■ listening</span>' : '<b>mic</b>'; $('#composer').toggleAttribute('data-hear', on); };
+  if (Speech) {
+    $('#mic').classList.remove('hidden'); $('#micsep').classList.remove('hidden');
+    $('#mic').onclick = () => {
+      if (rec) return rec.stop();
+      const r = rec = new Speech(), had = box.value.trim() ? box.value.trimEnd() + ' ' : '';
+      let done = '';
+      r.lang = navigator.language || 'en-US'; r.continuous = true; r.interimResults = true;
+      r.onresult = e => {
+        let part = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) done += t; else part += t; }
+        box.value = had + (done + part).trimStart(); typed(); box.scrollTop = box.scrollHeight;
+      };
+      r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') toast(e.error === 'not-allowed' ? "This browser isn't allowed the microphone here." : `Dictation stopped: ${e.error}`, 'bad'); };
+      r.onend = () => { if (rec === r) rec = null; hear(false); };
+      try { r.start(); hear(true); buzz(10); } catch { rec = null; hear(false); }
+    };
+    sc.on(() => rec && rec.abort());
+  }
+
+  // who else waits on you: on a narrow screen the list is a screen away, so
+  // it's asked for now and then, and said over the box with one tap to go
+  let waiting = [], waited = null, noticed = '';
+  const drawNotices = () => {
+    const w = waiting, h = w.length ? `<div class=notice><span class="flex-1 truncate">● ${esc(w.length === 1 ? (w[0].name || w[0].id) : w.length + ' others')} ${w.length === 1 ? 'needs' : 'need'} you</span><button class=key data-hop>go ›</button></div>` : '';
+    if (h !== noticed) $('#notices').innerHTML = noticed = h;
+  };
+  const peek = async () => {
+    if (wideQ.matches || document.hidden) { if (waiting.length) { waiting = []; drawNotices(); } return; }
+    try {
+      const l = await (await api('/sessions')).json();
+      if (!sc.live || !Array.isArray(l)) return;
+      lastList = l; onList && onList(l);
+      waiting = l.filter(i => i.id !== id && stateOf(i) === 'blocked');
+      const now = new Set(waiting.map(i => i.id));
+      if (waited && [...now].some(x => !waited.has(x))) buzz(60);
+      waited = now; drawNotices();
+    } catch {}
+  };
+  const peeker = setInterval(peek, 12e3);
+  sc.on(() => clearInterval(peeker));
+  peek();
+  $('#notices').onclick = e => { if (e.target.closest('[data-hop]') && waiting[0]) go(`#/s/${encodeURIComponent(machine)}/${encodeURIComponent(waiting[0].id)}`); };
   box.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); say(false); } };
   const drawPics = () => {
     $('#pics').innerHTML = pics.map((p, i) => `<span class=chip><img src="data:${p.type};base64,${p.data}" alt=""><button data-i=${i} aria-label=Remove>×</button></span>`).join('');
@@ -679,9 +757,11 @@ function sessionScreen(id, init) {
   const say = async guide => {
     const sent = box.value, t = sent.trim(), att = pics.slice();
     if ((!t && !att.length) || sending) return;
+    if (rec) rec.stop();
+    if (navigator.onLine === false) return toast("You're offline. Your message is kept in the box, here until it's sent.", 'bad');
     // ! runs it as a command in the session's folder, as rush's box does
     if (t[0] === '!' && !att.length && !guide) {
-      box.value = ''; grow(); bang();
+      box.value = ''; typed();
       return t.length > 1 ? shell(t.slice(1), true) : shell();
     }
     sending = true; $$('#send,#steer').forEach(b => b.disabled = true);
@@ -689,7 +769,7 @@ function sessionScreen(id, init) {
       await post(`/sessions/${encodeURIComponent(id)}/op`, {op: 'send', text: t, guide, pictures: att.length ? att : undefined});
       pics = pics.filter(p => !att.includes(p)); drawPics();
       box.value = box.value === sent ? '' : box.value.startsWith(sent) ? box.value.slice(sent.length).trimStart() : box.value;
-      grow(); stick = true; down();
+      typed(); stick = true; down(); buzz(10);
     } catch (e) {
       if (e === 401) return signIn();
       toast(`Not confirmed: ${e}. Your message is still in the box. It may have been delivered; check the conversation before sending again.`, 'bad');
@@ -889,6 +969,31 @@ function sessionScreen(id, init) {
     finish(c, o.IsError || (o.Exit != null && o.Exit !== 0));
   };
 
+  // what was said, each with its own actions a tap away (⋯): where a thumb
+  // can't easily select text, copy it, quote it in a reply, or send yours again
+  const moreBtn = mine => `<button class=msg-more data-say aria-label="${mine ? 'Copy, quote or send again' : 'Copy or quote'}">⋯</button>`;
+  const sayEl = text => { const e = el(`<div class=say>${md(text)}${moreBtn(false)}</div>`); e._raw = text; return e; };
+  const youEl = (text, extra = '') => { const e = el(`<div class=you><span class=who>you</span><div>${esc(text)}${extra}</div>${moreBtn(true)}</div>`); e._raw = text; return e; };
+  log.addEventListener('click', e => {
+    const b = e.target.closest('[data-say]');
+    if (!b) return;
+    const m = b.parentNode, mine = m.classList.contains('you'), raw = m._raw ?? m.textContent;
+    const d = sheet(`<fieldset class=box><legend>${mine ? 'you said' : esc(agentName(info.kind)) + ' said'}</legend><p class="text-dim msg-clamp">${esc(raw.slice(0, 240))}</p>
+      <div class=msg-acts><button class=key data-a=copy>copy</button><button class=key data-a=quote>quote in a reply</button>${mine ? '<button class=key data-a=again>into the box, to send again</button>' : ''}${navigator.share ? '<button class=key data-a=share>share</button>' : ''}</div></fieldset>`, 'msgacts');
+    d.onclick = ev => {
+      const a = ev.target.closest('[data-a]')?.dataset.a;
+      if (!a) return;
+      d.close();
+      if (a === 'copy') copy(raw);
+      if (a === 'share') navigator.share({text: raw}).catch(() => {});
+      if (a === 'quote' || a === 'again') {
+        const add = a === 'again' ? raw : raw.trim().split('\n').slice(0, 12).map(l => '> ' + l).join('\n') + '\n\n';
+        box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + add;
+        typed(); box.focus(); box.scrollTop = box.scrollHeight;
+      }
+    };
+  });
+
   const askEl = (t, v) => {
     const a = document.createElement('div'); a.className = 'ask';
     if (t === 'approval') {
@@ -1050,7 +1155,7 @@ function sessionScreen(id, init) {
         if (b.dataset.a === 'long') shRun(r.cmd, 600);
         if (b.dataset.a === 'agent') {
           box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + toAgent(r);
-          d.close(); if (tab !== 'c') $('#tabs [data-t=c]').click(); grow(); bang(); box.focus(); box.scrollTop = box.scrollHeight;
+          d.close(); if (tab !== 'c') $('#tabs [data-t=c]').click(); typed(); box.focus(); box.scrollTop = box.scrollHeight;
         }
       };
       if (fine.matches || !runs.length) inp.focus();
@@ -1114,7 +1219,8 @@ function sessionScreen(id, init) {
     switch (e.t) {
       case 'reset': break; // the stream handles it where it reads it
       case 'cut': more = true; break;
-      case 'sent': if (prep) break; live = null; put(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
+      case 'sent': if (prep) break; live = null; lastWho = 'you'; if (v.Text) sents.push(v.Text);
+        put(youEl(v.Text, v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : '')); break;
       case 'delta': if (v.Kind === 0 && !prep) {
         if (!live) { live = put('<div class=say></div>'); live._s = ''; }
         live._s += v.Text; live.innerHTML = md(live._s); down();
@@ -1124,11 +1230,14 @@ function sessionScreen(id, init) {
         if (v.ID) seenIds.add(v.ID);
         if (v.Role === 'assistant') {
           for (const p of v.Parts || []) {
-            if (p.Kind === 0 && p.Text.trim()) { if (!prep && live) { live.innerHTML = md(p.Text); live = null; } else put(`<div class=say>${md(p.Text)}</div>`); }
+            if (p.Kind === 0 && p.Text.trim()) {
+              if (!prep) lastWho = 'agent';
+              if (!prep && live) { const n = sayEl(p.Text); n._i = live._i; live.replaceWith(n); live = null; } else put(sayEl(p.Text));
+            }
             else if (p.Kind === 2 && p.Call) { const c = put(callEl(p.Call)); c._call = p.Call; calls.set(p.Call.ID, c); }
           }
         } else for (const p of v.Parts || []) {
-          if (p.Kind === 0 && p.Text && !v.Injected && !(live && !prep)) put(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
+          if (p.Kind === 0 && p.Text && !v.Injected && !(live && !prep)) { if (!prep) { lastWho = 'you'; sents.push(p.Text); } put(youEl(p.Text)); }
           if (p.Kind === 3 && p.Output) {
             const c = calls.get(p.Output.CallID);
             if (c) callOut(c, p.Output);
@@ -1136,7 +1245,7 @@ function sessionScreen(id, init) {
         }
       } break;
       case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n._i = c._i; n._call = v.Call; n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
-      case 'approval': case 'question': if (prep) break; { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
+      case 'approval': case 'question': if (prep) break; { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); if (!batch) buzz([30, 60, 30]); } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;
       case 'task_started': if (prep) break; tasks.set(v.ID, v); drawDetails(); break;
       case 'task_updated': case 'task_done': if (prep) break; { const t = tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; tasks.set(v.ID, t); drawDetails(); } break;
@@ -1253,6 +1362,7 @@ function sessionScreen(id, init) {
       const ag = [...calls.values()].filter(c => c._call?.Kind === K.AGENT && $('summary .run', c)).length, sh = [...tasks.values()].filter(t => !t.done).length;
       set($('#tabs [data-t=agents]'), '', 'agents' + (ag ? ` <span class=text-queue>⇉${ag}</span>` : ''), true);
       set($('#tabs [data-t=shells]'), '', 'shells' + (sh ? ` <span class=text-orange>✻${sh}</span>` : ''), true);
+      drawQuick();
     });
   };
 
@@ -1427,6 +1537,45 @@ function sessionScreen(id, init) {
   sc.on(() => es && es.close());
   stream();
 }
+
+// ── the palette (⌘K, or find): any session by a few letters, and the places to go ──
+function palette() {
+  if ($('#palette')) return;
+  const d = sheet(`<input id=palq class=field placeholder="a session, or where to go" aria-label="Find a session or a place" autocapitalize=off autocorrect=off spellcheck=false enterkeyhint=go><div id=pall class=pall role=listbox></div>`, 'palette');
+  const q = $('#palq', d), box = $('#pall', d);
+  const here = location.hash.match(/^#\/s\/([^/]+)\/([^/]+)/);
+  const places = [['+ new session', '#/new'], ['sessions', '#/'], ['fleet', '#/fleet'], ['devices and appearance', '#/devices'],
+    ...(here ? ['agents', 'shells', 'changes', 'overview'].map(t => ['this session › ' + t, `#/s/${here[1]}/${here[2]}/${t}`]) : [])];
+  let list = lastList, at = 0, shown = [];
+  const draw = () => {
+    const words = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean), hit = (...f) => words.every(w => f.some(x => String(x || '').toLowerCase().includes(w)));
+    const order = {blocked: 0, working: 1, starting: 1, idle: 2, asleep: 3, stopped: 4};
+    shown = [...list.map(i => ({...i, st: stateOf(i)})).filter(i => hit(i.name, i.cwd, i.st, i.model, agentName(i.kind))).sort((a, b) => order[a.st] - order[b.st] || ((b.updatedAt || '') > (a.updatedAt || '') ? 1 : -1))
+      .map(i => ({h: `#/s/${encodeURIComponent(machine)}/${encodeURIComponent(i.id)}`, html: `<span class="st-${esc(i.st)}">${marks[i.st] || '·'}</span><b class=truncate>${esc(i.name || i.id)}</b><span class="text-faint truncate">${esc(i.st === 'blocked' ? stateWords(i.st, i.needs) : home(i.cwd))}</span>`})),
+      ...places.filter(p => hit(p[0])).map(p => ({h: p[1], html: `<span class=text-dim>→</span><span>${esc(p[0])}</span>`}))].slice(0, 40);
+    at = Math.min(at, Math.max(0, shown.length - 1));
+    box.innerHTML = shown.map((x, i) => `<button role=option aria-selected=${i === at} data-i=${i}>${x.html}</button>`).join('') || '<p class="text-dim py-2">nothing by that name</p>';
+    $('[aria-selected=true]', box)?.scrollIntoView({block: 'nearest'});
+  };
+  const pick = i => { const x = shown[i]; if (!x) return; d.close(); go(x.h); };
+  q.oninput = () => { at = 0; draw(); };
+  q.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); at = (at + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % Math.max(1, shown.length); draw(); }
+    if (e.key === 'Enter') { e.preventDefault(); pick(at); }
+  };
+  box.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pick(+b.dataset.i); };
+  draw();
+  api('/sessions').then(r => r.json()).then(l => { if (d.open && Array.isArray(l)) { list = lastList = l; draw(); } }, () => {});
+  q.focus();
+}
+// keys: ⌘K or ctrl K the palette; esc out of a box, then back to the sessions
+addEventListener('keydown', e => {
+  if (!machines.length) return;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); return palette(); }
+  if (e.key !== 'Escape' || e.defaultPrevented || $('dialog[open]')) return;
+  if (e.target.matches('input, textarea, select')) return e.target.blur();
+  if (location.hash && location.hash !== '#/') go('#/');
+});
 
 // picture is an image file as a send carries it. A type an agent can't take
 // (a phone's HEIC, say) or a big one is redrawn as a JPEG at most 2000px.

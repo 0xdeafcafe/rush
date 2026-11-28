@@ -182,6 +182,18 @@ server in front of those hosts. This is the simpler plan that replaced
     while the page lives, to copy, run again, or put in the message box for
     the agent in the words rush's own shell box uses ("I ran `cmd` (exit
     N): …"). The commands you ran are kept in the browser, by machine.
+  - For a thumb: quick replies over the message box when the agent waits
+    on nothing but your word (a tap fills the box, no keyboard); `⋯` on a
+    message to copy it, quote it in a reply or put yours back in the box;
+    dictation where the browser has speech recognition; and, on a screen
+    too narrow for the sidebar, a line saying which other sessions need you
+    with one tap to the first (it asks `GET /api/sessions` every 12 seconds
+    there). A draft is kept in the browser until it's sent, and a send while
+    offline stays in the box.
+  - **The palette** (`⌘K`/`ctrl K`, or *find* on the sessions screen) goes
+    to any session by a few letters, or to a place. `esc` leaves a box, then
+    goes back to the sessions. The look (the system's, dark or light) is
+    picked on the devices screen and kept in the browser.
   - Every list of sessions (home, the sidebar, the fleet) draws the same
     rows: a rule per state (needs you, working, idle, asleep, stopped) with
     its count and spend, each session newest first with what it needs or is
