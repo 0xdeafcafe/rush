@@ -56,6 +56,14 @@ server in front of those hosts. This is the simpler plan that replaced
     `{"op":"resolve","id":…,"resolve":bool}`; mentions are kept by their ids
     as the CLI keeps them, and a feed that's off answers 400 (the user turns
     it on with `#feed on`).
+  - `POST /api/sessions/{id}/shell` with `{"command", "timeout"}` runs one
+    shell command in the folder that session works in, the way `!` in rush's
+    message box does: your login shell with `-lc`, nothing to read, stdout
+    and stderr together. It answers when the command ends, with
+    `{"out": base64, "code", "error", "cut"}`: the last 256 KB of what it
+    printed and its exit status. A command gets `timeout` seconds (60 when
+    unset, 600 at most), then it and all it started are killed. It's the web
+    app's *shell* (`shell.rs`).
   - `POST /api/sessions/{id}/op` sends one host op from an allowlist: send,
     allow/deny, interrupt, stop, model/effort/mode, stop_task, background,
     queue ops, away/back, limit (carry on at the reset or not), context,
@@ -163,6 +171,12 @@ server in front of those hosts. This is the simpler plan that replaced
     **overview** (the endpoint above, drawn as bars, tables and money).
     Switching tabs keeps the session's stream running underneath and its
     scroll position; the route is `#/s/<machine>/<id>/<tab>`.
+  - The **shell** (under the message box, from the shells tab, or a message
+    starting with `!`) runs a command in the session's folder through the
+    endpoint above, one at a time. What each printed stays in its sheet
+    while the page lives, to copy, run again, or put in the message box for
+    the agent in the words rush's own shell box uses ("I ran `cmd` (exit
+    N): …"). The commands you ran are kept in the browser, by machine.
   - Every list of sessions (home, the sidebar, the fleet) draws the same
     rows: a rule per state (needs you, working, idle, asleep, stopped) with
     its count and spend, each session newest first with what it needs or is
@@ -277,6 +291,14 @@ server in front of those hosts. This is the simpler plan that replaced
   argument inside that repository, and `core.fsmonitor` and external diffs off.
   It is a reader for the changes views, not a sandbox: the token can already
   start an agent that runs anything there.
+- The remote shell runs only for a session of this machine (not an attached
+  one), in the folder its info names: the request carries no path. Rush's
+  own folder and anything outside `workspaces` are refused as they are for a
+  new session, and every command is written to the session's events
+  (`remote-shell`). It gives the token nothing new, which can already start
+  an agent in any allowed folder and approve what it runs, but it is the
+  shortest way there: `"noShell": true` in `remote.json` turns it off, read
+  while serve runs.
 - A paired device is trusted as the token is: a web device can do what the
   app does, and an SSH device runs rush itself as you, with everything rush can
   do on this machine. Pair only your own devices; unpair a lost one in

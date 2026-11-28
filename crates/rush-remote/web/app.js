@@ -26,6 +26,20 @@ const api = (p, o) => fetch(base + '/api' + p, o).then(async r => {
 const post = (p, b) => api(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)});
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 
+// what this browser keeps for you: the commands you ran, a draft
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('rush.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { v === undefined || v === '' ? localStorage.removeItem('rush.' + k) : localStorage.setItem('rush.' + k, JSON.stringify(v)); } catch {} },
+};
+// a pointer that hovers and a keyboard, or a thumb
+const fine = matchMedia('(hover: hover) and (pointer: fine)');
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+const copy = async (text, what = 'copied') => {
+  try { await navigator.clipboard.writeText(text); toast(what); } catch { toast("This browser won't let the page copy.", 'bad'); }
+};
+// what happened to the session's shell commands, while the page lives
+const shellRuns = new Map();
+
 // the rush bottle, as the header draws it, a pixel to a cell
 const bottle = (cls = 'bottle') => `<svg class="${cls}" viewBox="0 0 6 10" shape-rendering="crispEdges" aria-hidden="true">
   <rect width="6" height="1" fill="#707074"/><rect y="1" width="6" height="1" fill="#404044"/><rect y="2" width="6" height="1" fill="#58585c"/>
@@ -610,6 +624,7 @@ function sessionScreen(id, init) {
     <div class=composer id=composer><div id=pics class=chips></div>
       <fieldset class=box><legend></legend><span class=prompt>❯</span><textarea id=txt rows=1 placeholder="message for this agent" enterkeyhint=send></textarea><button class="key key-on h-7" id=send>send</button></fieldset>
       <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
+        <button id=shb title="run a command in this session's folder; or start a message with !"><b>shell</b></button><span class=sep>·</span>
         <button id=steer title="into the turn under way"><b>steer</b></button><span class=sep>·</span><button id=halt class=text-red>stop</button><span class=sep>·</span><button id=chg><b>changes</b></button></div></div>`;
   head();
   onList = l => {
@@ -644,7 +659,8 @@ function sessionScreen(id, init) {
   let sending = false, pics = [];
   const box = $('#txt');
   const grow = () => { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 160) + 'px'; };
-  box.oninput = grow;
+  const bang = () => { const on = box.value[0] === '!'; $('#composer').toggleAttribute('data-bang', on); $('#send').textContent = on ? 'run' : 'send'; };
+  box.oninput = () => { grow(); bang(); };
   box.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); say(false); } };
   const drawPics = () => {
     $('#pics').innerHTML = pics.map((p, i) => `<span class=chip><img src="data:${p.type};base64,${p.data}" alt=""><button data-i=${i} aria-label=Remove>×</button></span>`).join('');
@@ -663,6 +679,11 @@ function sessionScreen(id, init) {
   const say = async guide => {
     const sent = box.value, t = sent.trim(), att = pics.slice();
     if ((!t && !att.length) || sending) return;
+    // ! runs it as a command in the session's folder, as rush's box does
+    if (t[0] === '!' && !att.length && !guide) {
+      box.value = ''; grow(); bang();
+      return t.length > 1 ? shell(t.slice(1), true) : shell();
+    }
     sending = true; $$('#send,#steer').forEach(b => b.disabled = true);
     try {
       await post(`/sessions/${encodeURIComponent(id)}/op`, {op: 'send', text: t, guide, pictures: att.length ? att : undefined});
@@ -961,6 +982,84 @@ function sessionScreen(id, init) {
     decEl = decisionsEl(d); decEl.dataset.id = d.ID; $('#asks').append(decEl); down();
   };
 
+  // the shell: one command at a time in the session's folder, as `!` in
+  // rush's message box runs it. What it printed stays in the sheet while the
+  // page lives, to copy, run again, or hand to the agent in the words rush's
+  // own shell box uses. The commands you ran are this browser's, by machine.
+  const runs = shellRuns.get(machine + '/' + id) || shellRuns.set(machine + '/' + id, []).get(machine + '/' + id);
+  const ran = () => store.get('sh.' + machine, []);
+  const plainOut = t => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]/g, '').replace(/^.*\r(?!\n)/gm, '').replace(/\r/g, '');
+  const secs = ms => ms < 1000 ? '0s' : ms < 60e3 ? Math.round(ms / 1000) + 's' : `${Math.floor(ms / 60e3)}m ${Math.round(ms % 60e3 / 1000)}s`;
+  const toAgent = r => `I ran \`${r.cmd}\` (${r.code === null ? r.error || 'no exit' : 'exit ' + r.code}):\n\`\`\`\n${r.out.trimEnd().split('\n').slice(-80).join('\n').slice(-6000)}\n\`\`\`\n`;
+  let shOpen = null;
+  const shDraw = () => {
+    if (!shOpen) return;
+    const lg = $('#shlog', shOpen), busy = runs.some(r => r.busy);
+    lg.innerHTML = runs.length ? runs.map((r, i) => `<div class=shrun data-i=${i} data-s=${r.busy ? 'run' : r.code === 0 ? 'ok' : 'err'}>
+        <div class=shcmd><span class=text-blue>$</span> <b>${esc(r.cmd)}</b></div>
+        ${r.out ? `<pre class=out>${r.cut ? '<span class=text-faint>… the start of it was dropped</span>\n' : ''}${esc(r.out)}</pre>` : ''}
+        <div class=shfoot>${r.busy ? '<span class=st-working>✻ running</span>' : `<span class="${r.code === 0 ? 'st-idle' : 'text-red'}">${r.code === null ? esc(r.error || 'failed') : 'exit ' + r.code}</span><span class=text-faint>· ${secs(r.took)}</span>
+          <span class=flex-1></span><button data-a=agent><b>to the agent</b></button><button data-a=copy><b>copy</b></button><button data-a=again><b>again</b></button>${/^stopped after/.test(r.error || '') && r.limit < 600 ? '<button data-a=long><b>again, 10 min</b></button>' : ''}`}</div></div>`).join('')
+      : `<p class="text-dim py-2">Runs in <span class=text-blue>${esc(home(info.cwd))}</span> on ${esc(machine)}, with your login shell. A command gets a minute, and nothing to type into.</p>`;
+    lg.scrollTop = lg.scrollHeight;
+    $('#shquick', shOpen).innerHTML = [...new Set([...ran(), 'git status', 'git log --oneline -10', 'ls -la'])].slice(0, 12).map(c => `<button class=key data-c="${esc(c)}">${esc(c)}</button>`).join('');
+    $('#shgo', shOpen).disabled = busy;
+  };
+  const shRun = async (cmd, limit = 60) => {
+    cmd = cmd.trim();
+    if (!cmd || runs.some(r => r.busy)) return;
+    store.set('sh.' + machine, [cmd, ...ran().filter(c => c !== cmd)].slice(0, 30));
+    const r = {cmd, out: '', code: null, error: '', busy: true, took: 0, limit, cut: false}, t0 = Date.now();
+    runs.push(r); if (runs.length > 40) runs.shift();
+    shDraw();
+    try {
+      const v = await (await post(`/sessions/${encodeURIComponent(id)}/shell`, {command: cmd, timeout: limit})).json();
+      r.out = plainOut(new TextDecoder().decode(Uint8Array.from(atob(v.out || ''), c => c.charCodeAt(0))));
+      r.code = v.code ?? null; r.error = v.error || ''; r.cut = !!v.cut;
+    } catch (e) {
+      if (e === 401) return signIn();
+      r.error = String(e);
+    }
+    r.busy = false; r.took = Date.now() - t0; buzz(r.code === 0 ? 10 : [20, 40, 20]);
+    shDraw();
+    if (!shOpen && sc.live) toast(`${r.cmd}: ${r.code === null ? r.error : 'exit ' + r.code}`, r.code === 0 ? '' : 'bad');
+  };
+  const shell = (cmd, run) => {
+    if (!shOpen) {
+      const d = shOpen = sheet(`<fieldset class=box><legend>shell · <span class=text-blue>${esc(home(info.cwd))}</span></legend><div id=shlog class=shlog role=log aria-label="what the commands printed"></div></fieldset>
+        <div id=shquick class=shquick aria-label="commands you ran"></div>
+        <form id=shform><fieldset class="box shbox"><legend>a command</legend><span class=text-blue>$</span><input id=shin aria-label=Command autocapitalize=off autocorrect=off autocomplete=off spellcheck=false enterkeyhint=go><button class="key key-on h-7" id=shgo>run</button></fieldset></form>`, 'shell');
+      const inp = $('#shin', d);
+      let at = -1;
+      d.addEventListener('close', () => { if (shOpen === d) shOpen = null; });
+      $('#shform', d).onsubmit = e => { e.preventDefault(); const c = inp.value; inp.value = ''; at = -1; shRun(c); };
+      // ↑ and ↓ walk the commands you ran
+      inp.onkeydown = e => {
+        const past = ran();
+        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !past.length) return;
+        e.preventDefault();
+        at = Math.max(-1, Math.min(past.length - 1, at + (e.key === 'ArrowUp' ? 1 : -1)));
+        inp.value = at < 0 ? '' : past[at];
+      };
+      $('#shquick', d).onclick = e => { const b = e.target.closest('[data-c]'); if (b) { inp.value = b.dataset.c; inp.focus(); } };
+      $('#shlog', d).onclick = e => {
+        const b = e.target.closest('[data-a]'), r = b && runs[+b.closest('.shrun').dataset.i];
+        if (!r) return;
+        if (b.dataset.a === 'copy') copy(r.out || r.cmd);
+        if (b.dataset.a === 'again') shRun(r.cmd, r.limit);
+        if (b.dataset.a === 'long') shRun(r.cmd, 600);
+        if (b.dataset.a === 'agent') {
+          box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + toAgent(r);
+          d.close(); if (tab !== 'c') $('#tabs [data-t=c]').click(); grow(); bang(); box.focus(); box.scrollTop = box.scrollHeight;
+        }
+      };
+      if (fine.matches || !runs.length) inp.focus();
+    }
+    if (cmd) { if (run) shRun(cmd); else $('#shin', shOpen).value = cmd; }
+    shDraw();
+  };
+  $('#shb').onclick = () => shell();
+
   // details: how it is, and what can be done with it from here
   let open = null;
   const details = () => { open = sheet('<div id=dt class=space-y-3></div>', 'details'); open.addEventListener('close', () => open = null); drawDetails(); };
@@ -1127,11 +1226,12 @@ function sessionScreen(id, init) {
       rows.push({top: (k.Input.Command || '').split('\n')[0] || k.Title || 'shell', mark: running ? '<span class=st-working>✻</span>' : failed ? '<span class=text-red>✗</span>' : '<span class=st-idle>✓</span>', card: c});
     }
     rows.reverse();
-    if (!rows.length) { pane.innerHTML = `<div class=empty><p>nothing in the background</p></div>`; pane.onclick = null; return; }
-    pane.innerHTML = rows.map((r, i) => `<div class=row data-i=${i} tabindex=0>
+    const mine = `<div class="flex items-center gap-2 pb-1"><button class=key data-run><span class=text-blue>$</span> run a command here</button>${runs.length ? `<span class=text-dim>${runs.length} run from this page</span>` : ''}</div>`;
+    pane.innerHTML = mine + (rows.length ? '' : `<div class=empty><p>nothing in the background</p></div>`) + rows.map((r, i) => `<div class=row data-i=${i} tabindex=0>
       <div class=row-top><b>${esc(r.top)}</b>${r.stop ? `<button class="key key-plain key-bad" data-stop="${esc(r.stop)}">stop</button>` : ''}${r.mark ? `<span class=shrink-0>${r.mark}</span>` : ''}</div>
       ${r.sub ? `<div class=row-sub><span>${esc(r.sub)}</span></div>` : ''}</div>`).join('');
     pane.onclick = e => {
+      if (e.target.closest('[data-run]')) return shell();
       const b = e.target.closest('[data-stop]');
       if (b) { op({op: 'stop_task', id: b.dataset.stop}); return; }
       const r = e.target.closest('[data-i]');

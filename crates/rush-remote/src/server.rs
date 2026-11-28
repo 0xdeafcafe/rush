@@ -259,6 +259,9 @@ impl Server {
             ["api", "sessions", id, "op"] if !id.is_empty() => {
                 allow(m == "POST", "POST").unwrap_or_else(|| self.op(r, id))
             }
+            ["api", "sessions", id, "shell"] if !id.is_empty() => {
+                allow(m == "POST", "POST").unwrap_or_else(|| self.shell(r, id))
+            }
             ["api", "git"] => allow(m == "POST", "POST").unwrap_or_else(|| self.git(r)),
             ["api", "others"] => allow(get, "GET, HEAD").unwrap_or_else(|| self.others()),
             ["api", "feed"] => match m {
@@ -1282,7 +1285,7 @@ pub(crate) fn under(p: &Path, root: &Path) -> bool {
 }
 
 /// A session id with a session folder behind it.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     if id.is_empty() || id.contains(['/', '\\', '.']) {
         return false;
     }
@@ -1799,7 +1802,7 @@ pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(
 }
 
 /// The start of s, enough to know it by, for the event log.
-fn clip(s: &str) -> String {
+pub(crate) fn clip(s: &str) -> String {
     let n = s.chars().count();
     if n > 300 {
         format!("{}…", s.chars().take(300).collect::<String>())

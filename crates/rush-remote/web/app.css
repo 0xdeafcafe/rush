@@ -108,3 +108,22 @@
 .ask .choice-pick{color:var(--color-yellow);font-size:12px;white-space:nowrap}
 .ask .choice.on .choice-k,.ask .choice.on .choice-t,.ask .choice.on .choice-t small,.ask .choice.on .choice-pick{color:var(--color-ground)}
 .ask .key:disabled{opacity:.5}
+/* the shell: what your commands printed, the ones you ran, and the line to type the next */
+.shlog{max-height:52dvh;min-height:6rem;overflow-y:auto;overscroll-behavior:contain;-webkit-user-select:text;user-select:text}
+.shrun{border-left:2px solid var(--color-faint);padding-left:calc(var(--spacing)*2.5);margin-block:calc(var(--spacing)*2)}
+.shrun[data-s=ok]{border-left-color:var(--color-green)}
+.shrun[data-s=err]{border-left-color:var(--color-red)}
+.shrun[data-s=run]{border-left-color:var(--color-orange)}
+.shcmd{color:var(--color-bright);overflow-wrap:anywhere}
+.shrun pre{max-height:40dvh;overflow-y:auto}
+.shfoot{display:flex;flex-wrap:wrap;align-items:center;column-gap:calc(var(--spacing)*2);font-size:12px;color:var(--color-dim)}
+.shfoot button{padding:var(--spacing)}
+.shfoot button b{font-weight:400;color:var(--color-sub)}
+.shquick{display:flex;gap:calc(var(--spacing)*1.5);overflow-x:auto;scrollbar-width:none;padding-block:calc(var(--spacing)*2)}
+.shquick .key{flex-shrink:0;font-size:12px;max-width:28ch;overflow:hidden;text-overflow:ellipsis;display:block;line-height:calc(var(--spacing)*8)}
+.shbox{display:flex;align-items:center;gap:calc(var(--spacing)*2);border-color:var(--color-blue);padding-bottom:calc(var(--spacing)*1.5)}
+.shbox input{flex:1;min-width:0;background:none;color:var(--color-bright);outline:none;height:calc(var(--spacing)*8)}
+.key:disabled{opacity:.5}
+@media (min-width:40rem){#shell.sheet{max-width:min(56rem,94vw)}}
+.composer[data-bang] .box{border-color:var(--color-blue)}
+.composer[data-bang] .prompt{color:var(--color-blue)}
