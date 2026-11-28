@@ -127,3 +127,7 @@
 @media (min-width:40rem){#shell.sheet{max-width:min(56rem,94vw)}}
 .composer[data-bang] .box{border-color:var(--color-blue)}
 .composer[data-bang] .prompt{color:var(--color-blue)}
+/* a subagent's conversation, in its sheet */
+.sublog{max-height:60dvh;overflow-y:auto;overscroll-behavior:contain}
+.sublog .say,.sublog .step{padding-left:0;padding-right:0}
+@media (min-width:40rem){#subagent.sheet{max-width:min(56rem,94vw)}}

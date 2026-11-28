@@ -171,6 +171,11 @@ server in front of those hosts. This is the simpler plan that replaced
     **overview** (the endpoint above, drawn as bars, tables and money).
     Switching tabs keeps the session's stream running underneath and its
     scroll position; the route is `#/s/<machine>/<id>/<tab>`.
+  - A subagent's conversation is also one tap from its card in the
+    conversation (*its conversation*), is read again every 4 seconds while
+    its sheet is open, and while its task runs takes a line to tell it
+    something (the `tell` op) and a stop. The agents and shells tabs carry
+    a count of what's at work behind them.
   - The **shell** (under the message box, from the shells tab, or a message
     starting with `!`) runs a command in the session's folder through the
     endpoint above, one at a time. What each printed stays in its sheet

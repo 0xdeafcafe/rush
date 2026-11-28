@@ -874,7 +874,7 @@ function sessionScreen(id, init) {
     const cmd = (i.Command || '').split('\n')[0];
     return c.Kind === K.SHELL && i.Description && i.Description !== cmd ? i.Description : '';
   };
-  const callEl = c => el(`<details class=step data-kind=${kindName(c.Kind)}><summary><span class=run>✻</span><span class=glyph>${kindGlyph[c.Kind] || glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
+  const callEl = (c, inner) => el(`<details class=step data-kind=${kindName(c.Kind)}><summary><span class=run>✻</span><span class=glyph>${kindGlyph[c.Kind] || glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}${c.Kind === K.AGENT && !inner ? `<p><button class="key" data-thread="${esc(c.ID)}">⇉ its conversation</button></p>` : ''}</div></details>`);
   const finish = (c, bad) => { const m = $('summary > span', c); m.className = 'ok'; m.textContent = bad ? '✗' : '✓'; if (bad) c.dataset.err = ''; };
   // a call's output lands in its card: what its edit did as patches, its
   // text or stdout (kept to a scroll), and its stderr when it failed
@@ -1186,31 +1186,74 @@ function sessionScreen(id, init) {
     if (!lastSubs.length) { pane.innerHTML = `<div class=empty><p>no subagents</p></div>`; return; }
     keyed(pane, lastSubs, s => s.id, () => el('<button class=row></button>'), (e, s) => { e.dataset.sub = s.id; e.innerHTML = subCard(s); });
   };
+  // A subagent's conversation, in a sheet: read again every few seconds
+  // while it's open, so one at work is watched as it goes; and while its
+  // task runs, a line to tell it something, and a stop.
   const openSub = s => {
-    const d = sheet(`<fieldset class=box><legend>⇉ ${esc(s.description || s.id)}${s.model ? ` · <span class=text-dim>${esc(s.model)}</span>` : ''}</legend><div id=sublog><div class="skeleton h-40"></div></div></fieldset>`, 'subagent');
-    api(`/sessions/${encodeURIComponent(id)}/subagents/${encodeURIComponent(s.id)}/events?limit=400`)
-      .then(r => r.json(), () => null)
-      .then(v => {
-        const box = $('#sublog', d);
-        if (!box || !v) return;
-        box.innerHTML = '';
-        const cs = new Map();
-        for (const e of v.events || []) {
-          const w = e.e || {};
-          if (e.t === 'turn_end') { if (w.Err) box.insertAdjacentHTML('beforeend', `<div class=err-line>✗ ${esc(w.Err)}</div>`); continue; }
-          if (e.t === 'plan') { const ts = w.Todos || [], now = ts.find(t => t.Status === 'in_progress'); box.insertAdjacentHTML('beforeend', todoBox(now ? now.Label : 'plan', ts)); continue; }
-          if (e.t !== 'message' || w.Parent) continue;
-          if (w.Role === 'assistant') {
-            for (const p of w.Parts || []) {
-              if (p.Kind === 0 && p.Text.trim()) box.insertAdjacentHTML('beforeend', `<div class=say>${md(p.Text)}</div>`);
-              else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); box.append(c); cs.set(p.Call.ID, c); }
-            }
-          } else for (const p of w.Parts || []) {
-            if (p.Kind === 0 && p.Text && !w.Injected) box.insertAdjacentHTML('beforeend', `<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
-            if (p.Kind === 3 && p.Output) { const c = cs.get(p.Output.CallID); if (c) callOut(c, p.Output); }
+    const d = sheet(`<fieldset class=box><legend>⇉ ${esc(s.description || s.id)}${s.model ? ` · <span class=text-dim>${esc(s.model)}</span>` : ''}</legend><div id=sublog class=sublog><div class="skeleton h-40"></div></div></fieldset>
+      <form id=subtell class=hidden><fieldset class="box shbox"><legend>tell it</legend><input id=subsay aria-label="Tell this subagent" placeholder="something it should know" enterkeyhint=send><button class="key key-on h-7">tell</button><button type=button class="key key-bad h-7" id=substop>stop</button></fieldset></form>`, 'subagent');
+    const box = $('#sublog', d);
+    const task = () => [...tasks.values()].find(t => !t.done && s.toolUseId && t.CallID === s.toolUseId);
+    let n = -1;
+    const fill = v => {
+      $('#subtell', d).classList.toggle('hidden', !task());
+      const evs = v.events || [];
+      if (evs.length === n) return;
+      const end = n < 0 || box.scrollHeight - box.scrollTop - box.clientHeight < 80, open = new Set($$('details[open]', box).map(c => c.dataset.call));
+      n = evs.length;
+      box.innerHTML = evs.length ? '' : '<p class="text-faint py-2">nothing said yet</p>';
+      const cs = new Map();
+      for (const e of evs) {
+        const w = e.e || {};
+        if (e.t === 'turn_end') { if (w.Err) box.insertAdjacentHTML('beforeend', `<div class=err-line>✗ ${esc(w.Err)}</div>`); continue; }
+        if (e.t === 'plan') { const ts = w.Todos || [], now = ts.find(t => t.Status === 'in_progress'); box.insertAdjacentHTML('beforeend', todoBox(now ? now.Label : 'plan', ts)); continue; }
+        if (e.t !== 'message' || w.Parent) continue;
+        if (w.Role === 'assistant') {
+          for (const p of w.Parts || []) {
+            if (p.Kind === 0 && p.Text.trim()) box.insertAdjacentHTML('beforeend', `<div class=say>${md(p.Text)}</div>`);
+            else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call, true); c.dataset.call = p.Call.ID; c.open = open.has(p.Call.ID); box.append(c); cs.set(p.Call.ID, c); }
           }
+        } else for (const p of w.Parts || []) {
+          if (p.Kind === 0 && p.Text && !w.Injected) box.insertAdjacentHTML('beforeend', `<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
+          if (p.Kind === 3 && p.Output) { const c = cs.get(p.Output.CallID); if (c) callOut(c, p.Output); }
         }
-      });
+      }
+      if (end) box.scrollTop = box.scrollHeight;
+    };
+    const read = () => api(`/sessions/${encodeURIComponent(id)}/subagents/${encodeURIComponent(s.id)}/events?limit=400`)
+      .then(r => r.json(), () => null).then(v => { if (v && d.open) fill(v); });
+    read();
+    const t = setInterval(read, 4000);
+    d.addEventListener('close', () => clearInterval(t));
+    $('#subtell', d).onsubmit = async e => {
+      e.preventDefault();
+      const k = task(), i = $('#subsay', d), text = i.value.trim();
+      if (k && text && await op({op: 'tell', id: k.ID, text})) { i.value = ''; toast('told'); read(); }
+    };
+    $('#substop', d).onclick = () => { const k = task(); if (k) op({op: 'stop_task', id: k.ID}); };
+  };
+  // from a subagent's card in the conversation, straight to its own
+  const openThread = async call => {
+    try {
+      const v = await (await api(`/sessions/${encodeURIComponent(id)}/subagents`)).json();
+      if (!sc.live) return;
+      const sub = (v.subagents || []).find(x => x.toolUseId === call);
+      if (sub) openSub(sub); else toast("That one's conversation isn't kept.");
+    } catch (e) { failed(e); }
+  };
+  log.addEventListener('click', e => { const b = e.target.closest('[data-thread]'); if (b) openThread(b.dataset.thread); });
+  // the tabs say what's under way behind them: subagents at work, things running in the background
+  let tallied = false;
+  const tabTally = () => {
+    if (tallied) return;
+    tallied = true;
+    requestAnimationFrame(() => {
+      tallied = false;
+      if (!sc.live) return;
+      const ag = [...calls.values()].filter(c => c._call?.Kind === K.AGENT && $('summary .run', c)).length, sh = [...tasks.values()].filter(t => !t.done).length;
+      set($('#tabs [data-t=agents]'), '', 'agents' + (ag ? ` <span class=text-queue>⇉${ag}</span>` : ''), true);
+      set($('#tabs [data-t=shells]'), '', 'shells' + (sh ? ` <span class=text-orange>✻${sh}</span>` : ''), true);
+    });
   };
 
   // shells: the session's background — the tasks its events tell of, and
@@ -1351,6 +1394,7 @@ function sessionScreen(id, init) {
     stick = was;
     scrollTo(0, was ? document.body.scrollHeight : Math.max(0, document.body.scrollHeight - fromEnd));
     if (tab === 'shells') drawShells();
+    tabTally();
   };
   const stream = () => {
     if (es) es.close();
@@ -1376,6 +1420,7 @@ function sessionScreen(id, init) {
       apply(e, false, evts.length - 1, null);
       trim();
       if (tab === 'shells') drawShells(); // its rows are the background's live state
+      tabTally();
     };
   };
   sc.on(() => { if (re) { clearTimeout(re.t); clearTimeout(re.cap); } });
