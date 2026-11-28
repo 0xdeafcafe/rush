@@ -349,8 +349,15 @@ function sessionScreen(id, full) {
   ro.observe($('#composer'));
   sc.on(() => ro.disconnect());
 
-  const log = $('#log'), asks = new Map(), tasks = new Map(), calls = new Map();
-  let stick = !full, live = null, plan = null;
+  const log = $('#log'), asks = new Map(), tasks = new Map();
+  let calls = new Map(), stick = !full, live = null, plan = null;
+  // into is where events draw: the log, or while a replay comes in (re), the
+  // log's next self, off the page. A replay is hundreds of events at once,
+  // at opening and whenever serve sends the conversation again; drawn
+  // straight onto the page each would move it. It's swapped in whole once
+  // the stream goes quiet, and only if it differs from what's shown.
+  let into = log, re = null;
+  log.innerHTML = '<div class="px-3 py-2"><div class="skeleton h-4 w-2/3 my-0.5"></div><div class="skeleton h-3 w-1/3 mt-1.5"></div></div>';
   const op = o => post(`/sessions/${encodeURIComponent(id)}/op`, o).then(() => true, e => { failed(e); return false; });
 
   // say sends the draft once. It stays in the box until the server has taken
@@ -410,11 +417,39 @@ function sessionScreen(id, full) {
     } catch (e) { $('#chgbody', d).innerHTML = `<div class=err-line>${esc(e)}</div>`; }
   };
 
-  const down = () => { if (stick) scrollTo(0, document.body.scrollHeight); };
-  const onScroll = () => { stick = innerHeight + scrollY >= document.body.scrollHeight - 120; };
+  // down keeps the end in view, once a frame however much arrived in it
+  let downs = false;
+  const bottom = () => scrollTo({top: document.body.scrollHeight, behavior: 'instant'});
+  const down = () => {
+    if (!stick || re || downs) return;
+    downs = true;
+    requestAnimationFrame(() => { downs = false; if (sc.live && stick && !re) bottom(); });
+  };
+  const onScroll = () => { if (!re) stick = innerHeight + scrollY >= document.body.scrollHeight - 120; };
   addEventListener('scroll', onScroll, {passive: true});
   sc.on(() => removeEventListener('scroll', onScroll));
-  const add = h => { const e = el(h); log.append(e); down(); return e; };
+  const add = h => { const e = el(h); into.append(e); down(); return e; };
+  const replay = () => {
+    if (re) clearTimeout(re.t);
+    else re = {calls, plan, live, stick, y: scrollY, at: Date.now()};
+    into = document.createElement('div');
+    calls = new Map(); plan = null; live = null; tasks.clear();
+    asks.forEach(a => { a.dataset.stale = ''; }); // one the replay brings again stays as it is
+  };
+  const settle = () => {
+    const was = re;
+    clearTimeout(was.t); re = null;
+    if (!sc.live) return;
+    // a step you opened stays open
+    const open = new Set($$('details[open][data-id]', log).map(d => d.dataset.id));
+    $$('details[data-id]', into).forEach(d => { if (open.has(d.dataset.id)) d.open = true; });
+    if (into.innerHTML === log.innerHTML) { calls = was.calls; plan = was.plan; live = was.live; }
+    else log.replaceChildren(...into.childNodes);
+    into = log;
+    asks.forEach((a, k) => { if ('stale' in a.dataset) { a.remove(); asks.delete(k); } });
+    stick = was.stick;
+    if (stick) bottom(); else scrollTo({top: was.y, behavior: 'instant'});
+  };
 
   const diff = ed => `<pre>${ed.Old ? ed.Old.split('\n').map(x => `<span class=del>- ${esc(x)}</span>`).join('\n') + '\n' : ''}${(ed.New || '').split('\n').map(x => `<span class=add>+ ${esc(x)}</span>`).join('\n')}</pre>`;
   const callBody = c => {
@@ -426,7 +461,7 @@ function sessionScreen(id, full) {
   };
   const callWhat = c => { const i = c.Input || {}; return i.Description || home(i.Path) || i.Pattern || (i.Command || '').split('\n')[0] || ''; };
   const callMore = c => { const i = c.Input || {}; return i.Description ? (i.Command || '').split('\n')[0] : ''; };
-  const callEl = c => el(`<details class=step><summary><span class=run>✻</span><span class=glyph>${glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
+  const callEl = c => el(`<details class=step data-id="${esc(c.ID)}"><summary><span class=run>✻</span><span class=glyph>${glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
   const finish = (c, bad) => { const m = $('summary > span', c); m.className = 'ok'; m.textContent = bad ? '✗' : '✓'; if (bad) c.dataset.err = ''; };
 
   const askEl = (t, v) => {
@@ -539,15 +574,15 @@ function sessionScreen(id, full) {
   };
 
   const es = new EventSource(base + `/api/sessions/${encodeURIComponent(id)}/events` + (full ? '?full=1' : ''));
-  sc.on(() => es.close());
+  sc.on(() => { es.close(); if (re) clearTimeout(re.t); });
   es.onmessage = m => {
     if (!sc.live) return;
     const e = JSON.parse(m.data), v = e.e || {};
     switch (e.t) {
-      case 'reset': log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; decEl = null; tasks.clear(); calls.clear(); live = null; plan = null; break;
+      case 'reset': replay(); break;
       case 'cut':
-        if (full) log.prepend(el('<p class="px-3 py-2 text-faint">— the earliest history is too long to show —</p>'));
-        else { const b = el('<div class="px-3 py-2"><button class="key key-plain text-dim" id=earlier>↑ show earlier</button></div>'); log.prepend(b); $('#earlier').onclick = () => go(`#/s/${encodeURIComponent(machine)}/${id}/all`); }
+        if (full) into.prepend(el('<p class="px-3 py-2 text-faint">— the earliest history is too long to show —</p>'));
+        else { const b = el('<div class="px-3 py-2"><button class="key key-plain text-dim" id=earlier>↑ show earlier</button></div>'); into.prepend(b); $('button', b).onclick = () => go(`#/s/${encodeURIComponent(machine)}/${id}/all`); }
         break;
       case 'sent': live = null; add(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
       case 'delta': if (v.Kind === 0) {
@@ -559,7 +594,7 @@ function sessionScreen(id, full) {
         if (v.Role === 'assistant') {
           for (const p of v.Parts || []) {
             if (p.Kind === 0 && p.Text.trim()) { if (live) { live.innerHTML = md(p.Text); live = null; } else add(`<div class=say>${md(p.Text)}</div>`); }
-            else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); log.append(c); calls.set(p.Call.ID, c); down(); }
+            else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); into.append(c); calls.set(p.Call.ID, c); down(); }
           }
         } else for (const p of v.Parts || []) {
           if (p.Kind === 0 && p.Text && !v.Injected && !live) add(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
@@ -570,7 +605,10 @@ function sessionScreen(id, full) {
         }
         break;
       case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
-      case 'approval': case 'question': { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
+      case 'approval': case 'question': {
+        const had = asks.get(v.ID);
+        if (re && had) { delete had.dataset.stale; break; }
+        drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;
       case 'task_started': tasks.set(v.ID, v); drawDetails(); break;
       case 'task_updated': case 'task_done': { const t = tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; tasks.set(v.ID, t); drawDetails(); } break;
@@ -588,6 +626,12 @@ function sessionScreen(id, full) {
         if (v.state && v.state !== 'blocked') { asks.forEach(a => a.remove()); asks.clear(); } // a decision no longer waited on is stale
         showDecisions(v.decisions);
         break;
+    }
+    // the replay is in once nothing has come for a moment, or it has run long
+    // (what streams as it's written doesn't hold it open)
+    if (re) {
+      if (Date.now() - re.at > 2500) settle();
+      else if (e.t !== 'delta' || !re.t) { clearTimeout(re.t); re.t = setTimeout(settle, 120); }
     }
   };
 }
