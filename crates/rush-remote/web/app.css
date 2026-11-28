@@ -173,7 +173,6 @@ textarea.field { resize: vertical; min-height: 8em; display: block; }
 .say { position: relative; padding: 4px var(--pad); overflow-wrap: anywhere; }
 .say-copy { position: absolute; top: 0; right: var(--pad); font-size: 12px; color: rgb(var(--dim)); background: rgb(var(--chrome)); padding: 2px 8px; opacity: 0; }
 .say:hover > .say-copy, .say-copy:focus-visible { opacity: 1; }
-@media (hover: none) { .say-copy { display: none; } }
 .think { padding: 2px var(--pad); color: rgb(var(--dim)); }
 .think > summary { color: rgb(var(--dim)); } .think > div { white-space: pre-wrap; padding: 2px 0 4px 2ch; font-size: 12.5px; overflow-wrap: anywhere; }
 .meta { padding: 2px var(--pad) 6px; color: rgb(var(--dim)); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -292,6 +291,18 @@ pre .add, pre .del, pre .hunk { display: block; } pre .add { background: rgb(var
 .menu button { display: flex; gap: 2ch; width: 100%; text-align: left; padding: 6px 10px; min-height: calc(var(--tap) - 6px); align-items: center; }
 .menu button[aria-selected=true] { background: rgb(var(--sel)); box-shadow: inset 2px 0 rgb(var(--orange)); } .menu button span { color: rgb(var(--dim)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drop::after { content: "drop images to attach"; position: absolute; inset: 8px; display: grid; place-items: center; border: 1px dashed rgb(var(--orange)); background: rgb(var(--ground) / .85); color: rgb(var(--orange)); z-index: 8; pointer-events: none; }
+
+/* ── a thumb's own: quick replies, a message's actions, dictation ── */
+.quick { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; } .quick::-webkit-scrollbar { display: none; }
+.quick .key { flex-shrink: 0; font-size: 13px; color: rgb(var(--sub)); }
+.more { margin-left: auto; padding: 0 8px; color: rgb(var(--dim)); min-height: 24px; }
+@media (hover: none) { .say-copy { display: block; opacity: .55; background: none; top: -2px; right: calc(var(--pad) - 8px); padding: 0 8px; min-height: 24px; } .say { padding-right: calc(var(--pad) + 2ch); } }
+@media (hover: hover) and (pointer: fine) { .more { opacity: 0; } .you:hover .more, .more:focus-visible { opacity: 1; } }
+.acts { display: grid; gap: 6px; } .acts .key { justify-content: flex-start; text-align: left; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.composer[data-hear] .box { border-color: rgb(var(--red)); } .composer[data-hear] .prompt { color: rgb(var(--red)); animation: breathe 1s ease-in-out infinite; }
+#mic[aria-pressed=true] { color: rgb(var(--red)); }
+.notice[data-kind=ask] { background: rgb(var(--ask)); color: rgb(var(--yellow)); }
 
 /* ── the shell ── */
 .shell { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

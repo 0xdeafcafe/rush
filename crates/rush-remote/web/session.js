@@ -28,10 +28,11 @@ function sessionScreen(id, full) {
       <div id=menu class=menu role=listbox aria-label=Commands hidden></div>
       <div class=dock-in>
         <div id=notices></div><div id=asks aria-live=polite></div><div id=strip></div>
+        <div id=quick class=quick aria-label="Quick replies" hidden></div>
         <div class=composer id=composer><div id=pics class=chips></div>
           <fieldset class=box><legend></legend><span class=prompt aria-hidden=true>❯</span><textarea id=txt rows=1 placeholder="Message this agent" aria-label=Message enterkeyhint=${fine.matches ? 'send' : 'enter'} autocapitalize=sentences></textarea>
             <button class="key key-bad" id=halt hidden aria-label="Stop the turn">■ stop</button><button class="key key-on" id=send>send</button></fieldset>
-          <div class=hints><button id=pic>image</button><input id=file type=file accept="image/*" multiple hidden><span class=sep>·</span><button id=shb title="Run a command in this session's folder (or start a message with !)">shell</button><span class=sep>·</span><button id=steer hidden title="Into the turn under way, not after it">steer</button><span class=sep id=steersep hidden>·</span>
+          <div class=hints><button id=pic>image</button><input id=file type=file accept="image/*" multiple hidden><span class=sep>·</span><button id=mic hidden aria-pressed=false title="Say it: dictation into the message box">mic</button><span class=sep id=micsep hidden>·</span><button id=shb title="Run a command in this session's folder (or start a message with !)">shell</button><span class=sep>·</span><button id=steer hidden title="Into the turn under way, not after it">steer</button><span class=sep id=steersep hidden>·</span>
             <button id=modeb hidden></button><span class=keys>enter sends · shift enter for a new line · ! runs a command</span></div></div>
       </div></div></div>`;
   const scroll = $('#scroll'), log = $('#log'), box = $('#txt'), jump = $('#jump');
@@ -80,17 +81,38 @@ function sessionScreen(id, full) {
     set($('#modeb'), '', `mode <b>${esc(mode ? mode.name || mode.id : info.permissionMode || '')}</b>`, true);
     $('#tail').hidden = !busy;
     set($('#tailsay'), '', S.status || info.detail || (st === 'starting' ? 'starting' : 'working'));
-    tick(); drawNotices(); drawStrip();
+    tick(); drawNotices(); drawStrip(); drawQuick();
   };
   const tick = () => { set($('#tailtime'), '', S.sentAt ? dur((Date.now() - S.sentAt) / 1000) : ''); };
   const ticker = setInterval(tick, 1000);
   sc.on(() => clearInterval(ticker));
+
+  // on a narrow window the list isn't kept beside this, so nothing would say
+  // another session has come to need you: it's asked for, now and then
+  let waited = null;
+  const peek = async () => {
+    if (wide() || document.hidden) return;
+    try {
+      const l = await (await api('/sessions')).json();
+      if (!sc.live || !Array.isArray(l)) return;
+      lastList = l;
+      const now = new Set(l.filter(i => i.id !== id && stateOf(i) === 'blocked').map(i => i.id));
+      if (waited && [...now].some(x => !waited.has(x))) buzz(60);
+      waited = now; drawNotices();
+    } catch {}
+  };
+  const peeker = setInterval(peek, 12e3);
+  sc.on(() => clearInterval(peeker));
+  peek();
 
   let noticed = '';
   const drawNotices = () => {
     const n = [], r = info.retry, l = info.limit, aw = info.away, held = aw && (aw.held || []).length ? ` · ${aw.held.length} held for you` : '';
     if (lostConn) n.push(['warn', navigator.onLine === false ? 'You are offline. Messages wait in the box.' : 'Connection lost. Trying again…']);
     if (info.error) n.push(['bad', info.error]);
+    // on a phone the list is a screen away: who else waits on you, one tap from here
+    const wait = wide() ? [] : lastList.filter(i => i.id !== id && stateOf(i) === 'blocked');
+    if (wait.length) n.push(['ask', `● ${wait.length === 1 ? (wait[0].name || wait[0].id) : wait.length + ' others'} ${wait.length === 1 ? 'needs' : 'need'} you`, 'hop', 'go ›']);
     if (r) n.push(['warn', r.gaveUp ? `gave up: ${r.why || r.reason}` : `retrying ${r.attempt}/${r.max}${r.reason ? ' · ' + r.reason : ''}`]);
     if (l) n.push(['warn', `usage limit until ${clock(l.resetsAt)} · ${l.continue ? 'carries on then' : 'waits for you'}`, l.continue ? 'limit0' : 'limit1', l.continue ? "don't carry on" : 'carry on then']);
     if (aw && !aw.ended) n.push(['', `you're away${zero(aw.until) ? '' : ' until ' + clock(aw.until)}${held}`, 'back', "i'm back"]);
@@ -101,6 +123,7 @@ function sessionScreen(id, full) {
   $('#notices').onclick = e => {
     const k = e.target.closest('[data-n]')?.dataset.n;
     if (k === 'back') op({op: 'away'});
+    if (k === 'hop') { const w = lastList.find(i => i.id !== id && stateOf(i) === 'blocked'); if (w) go(sessionHash(w.id)); }
     if (k === 'limit0' || k === 'limit1') op({op: 'limit', now: k === 'limit1'});
   };
 
@@ -164,6 +187,8 @@ function sessionScreen(id, full) {
   const say = async guide => {
     const sent = box.value, t = sent.trim(), att = pics.slice();
     if ((!t && !att.length) || sending) return;
+    if (rec) rec.stop();
+    if (navigator.onLine === false) return toast("You're offline. Your message is kept in the box, here until it's sent.", 'bad');
     if (t[0] === '!' && !att.length && !guide) {
       if (t.length > 1) shell(t.slice(1), true); else shell();
       box.value = ''; store.set('draft.' + key, ''); grow(); drawBang(); return;
@@ -174,7 +199,7 @@ function sessionScreen(id, full) {
       pics = pics.filter(p => !att.includes(p)); drawPics();
       box.value = box.value === sent ? '' : box.value.startsWith(sent) ? box.value.slice(sent.length).trimStart() : box.value;
       store.set('draft.' + key, box.value); recall = -1;
-      grow(); stick = true; fresh = false; bottom(); drawJump(); buzz(10);
+      grow(); stick = true; fresh = false; bottom(); drawJump(); drawQuick(); buzz(10);
     } catch (e) {
       if (e === 401) return signIn();
       toast(`Not confirmed: ${e}. Your message is still in the box. It may have been delivered; check the conversation before sending again.`, 'bad');
@@ -183,6 +208,41 @@ function sessionScreen(id, full) {
     }
   };
   const drawBang = () => { const bang = box.value[0] === '!'; $('#composer').toggleAttribute('data-bang', bang); $('#send').textContent = bang ? 'run' : 'send'; };
+  // quick replies: an answer without the keyboard. Shown to a thumb, when
+  // the agent waits on nothing but your word: tap one into the box, then send
+  const quick = $('#quick');
+  let quicked = '';
+  const drawQuick = () => {
+    const show = !fine.matches && !box.value && !pics.length && stNow() === 'idle' && !asks.size && !info.decisions && !re && !!S.lastYou;
+    const said = [...new Set(S.sents.slice().reverse().filter(t => t.length <= 16 && !t.includes('\n') && !/^[!\/]/.test(t)))].slice(0, 3);
+    const h = show ? [...new Set(['continue', 'yes', 'no', ...said, 'explain that', 'run the tests', 'commit it'])].map(t => `<button class=key data-t="${esc(t)}">${esc(t)}</button>`).join('') : '';
+    quick.hidden = !h;
+    if (h !== quicked) quick.innerHTML = quicked = h;
+  };
+  quick.onclick = e => { const b = e.target.closest('[data-t]'); if (b) { box.value = b.dataset.t; store.set('draft.' + key, box.value); grow(); drawQuick(); buzz(8); } };
+
+  // dictation, where the browser has it: what you say lands in the box as you say it
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  const hear = on => { $('#mic').setAttribute('aria-pressed', on); $('#mic').textContent = on ? '■ listening' : 'mic'; $('#composer').toggleAttribute('data-hear', on); };
+  if (Speech) {
+    $('#mic').hidden = $('#micsep').hidden = false;
+    $('#mic').onclick = () => {
+      if (rec) return rec.stop();
+      const r = rec = new Speech(), had = box.value.trim() ? box.value.trimEnd() + ' ' : '';
+      let done = '';
+      r.lang = navigator.language || 'en-US'; r.continuous = true; r.interimResults = true;
+      r.onresult = e => {
+        let part = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) done += t; else part += t; }
+        box.value = had + (done + part).trimStart(); grow(); drawBang(); drawQuick(); box.scrollTop = box.scrollHeight;
+      };
+      r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') toast(e.error === 'not-allowed' ? "This browser isn't allowed the microphone here." : `Dictation stopped: ${e.error}`, 'bad'); };
+      r.onend = () => { if (rec === r) rec = null; hear(false); store.set('draft.' + key, box.value); };
+      try { r.start(); hear(true); buzz(10); } catch { rec = null; hear(false); }
+    };
+    sc.on(() => rec && rec.abort());
+  }
   $('#send').onclick = () => say(false);
   $('#steer').onclick = () => say(true);
   $('#halt').onclick = () => { buzz(30); op({op: 'interrupt'}); };
@@ -200,7 +260,7 @@ function sessionScreen(id, full) {
   };
   const pickMenu = i => { box.value = '/' + menuList[i].Name + ' '; menu.hidden = true; menuList = []; box.focus(); store.set('draft.' + key, box.value); };
   menu.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pickMenu(+b.dataset.i); };
-  box.oninput = () => { grow(); store.set('draft.' + key, box.value); recall = -1; drawMenu(); drawBang(); };
+  box.oninput = () => { grow(); store.set('draft.' + key, box.value); recall = -1; drawMenu(); drawBang(); drawQuick(); };
   box.onkeydown = e => {
     if (e.isComposing) return;
     if (menuList.length) {
@@ -428,13 +488,33 @@ function sessionScreen(id, full) {
     o.innerHTML = text ? `${cutAt ? `<div class=note>… ${cutAt} characters before this</div>` : ''}<pre>${esc(text.slice(cutAt))}</pre>` : '';
   };
   // taps in a thread: a run of steps opens, a subagent's step opens its own thread, copy copies
+  // a message's own actions: where a thumb can't select text, and hover shows nothing
+  const sayActs = (raw, mine) => {
+    const d = sheet(`<div class=sheet-in><p class="note clamp">${esc(raw.slice(0, 240))}</p><div class=acts>
+      <button class=key data-a=copy>copy</button><button class=key data-a=quote>quote in a reply</button>${mine ? '<button class=key data-a=again>into the box, to send again</button>' : ''}${navigator.share ? '<button class=key data-a=share>share</button>' : ''}</div></div>`, {title: mine ? 'You said' : agentName(info.kind) + ' said'});
+    d.onclick = e => {
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (!a) return;
+      d.close();
+      if (a === 'copy') copy(raw);
+      if (a === 'share') navigator.share({text: raw}).catch(() => {});
+      if (a === 'quote' || a === 'again') {
+        const add = a === 'again' ? raw : raw.trim().split('\n').slice(0, 12).map(l => '> ' + l).join('\n') + '\n\n';
+        box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + add;
+        store.set('draft.' + key, box.value); grow(); drawBang(); drawQuick(); box.focus(); box.scrollTop = box.scrollHeight;
+      }
+    };
+  };
   const taps = e => {
     const h = e.target.closest('.steps-head');
     if (h) { const g = h.parentNode, o = g.toggleAttribute('data-open'); h.setAttribute('aria-expanded', o); return; }
     const a = e.target.closest('.step[data-sub] > summary');
     if (a) { e.preventDefault(); return openSubs(a.parentNode.dataset.id); }
     const c = e.target.closest('[data-say]');
-    if (c) return copy(c.parentNode._raw || c.parentNode.textContent);
+    if (c) {
+      const mine = c.closest('.you'), m = mine || c.parentNode, raw = mine ? mine._t || '' : m._raw || m.textContent;
+      return fine.matches && !mine ? copy(raw) : sayActs(raw, !!mine);
+    }
   };
   log.onclick = e => {
     taps(e);
@@ -447,10 +527,10 @@ function sessionScreen(id, full) {
     S.said = true;
     if (S.lastYou) html(`<div class=who><b class=c-orange>${esc(agentName(info.kind))}</b>${now() ? `<time>${esc(clock(now()))}</time>` : ''}</div>`);
   };
-  const sayEl = text => { const e = el(`<div class="say md">${md(text)}<button class=say-copy data-say>copy</button></div>`); e._raw = text; return e; };
+  const sayEl = text => { const e = el(`<div class="say md">${md(text)}<button class=say-copy data-say aria-label="Copy or quote">${fine.matches ? 'copy' : '⋯'}</button></div>`); e._raw = text; return e; };
   const you = (text, images) => {
     S.live = null; S.group = null; S.said = false; S.steps = 0; S.sentAt = now(); S.status = '';
-    S.lastYou = html(`<div class=you><div class=you-head><b>You</b>${now() ? `<time>${esc(clock(now()))}</time>` : ''}</div><div class=you-text>${esc(text)}${images ? ` <span class=c-dim>+ ${plural(images, 'image')}</span>` : ''}</div></div>`);
+    S.lastYou = html(`<div class=you><div class=you-head><b>You</b>${now() ? `<time>${esc(clock(now()))}</time>` : ''}<button class=more data-say aria-label="Copy, quote or send again">⋯</button></div><div class=you-text>${esc(text)}${images ? ` <span class=c-dim>+ ${plural(images, 'image')}</span>` : ''}</div></div>`);
     S.lastYou._t = text;
     if (text && S.sents[S.sents.length - 1] !== text) S.sents.push(text);
   };
@@ -674,6 +754,7 @@ function sessionScreen(id, full) {
     } else log.replaceChildren(...into.childNodes);
     into = log;
     asks.forEach((a, k) => { if ('stale' in a.dataset) { a.remove(); asks.delete(k); } });
+    drawQuick();
     stick = was.stick;
     if (earlier && earlier.id === id && full) { scroll.scrollTop = scroll.scrollHeight - earlier.h; earlier = null; stick = atEnd(); }
     else if (stick) bottom(); else scroll.scrollTop = was.top;
@@ -733,7 +814,7 @@ function sessionScreen(id, full) {
       case 'approval': case 'question': {
         const had = asks.get(v.ID);
         if (re && had) { delete had.dataset.stale; break; }
-        drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a);
+        drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); if (!re) buzz([30, 60, 30]); drawQuick();
         if (!re) buzz(60);
       } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;

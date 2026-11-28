@@ -122,6 +122,13 @@ server in front of those hosts. This is the simpler plan that replaced
   `/api/sessions/{id}/shell` and can hand what it printed to the agent, in
   the words rush's own shell box uses. It keeps the commands you ran, per
   machine, in the browser.
+  For a thumb: quick replies over the message box when the agent waits on
+  nothing but your word (a tap fills the box, no keyboard), `⋯` on a message
+  to copy, quote or send it again, dictation where the browser has speech
+  recognition, and a line saying which other sessions need you with one tap
+  to the first. On a narrow window the list's stream isn't held open beside
+  a session, so that line asks `GET /api/sessions` every 12 seconds while
+  the page shows.
   It also serves a PWA manifest and a service worker.
 - **Native terminal, two ways.** `rush session --on <name> list|start|send|interrupt|stop|info|watch`
   goes over HTTP; `<name>` is a peer in `remote.json` (`rush remote add`), or `self`.
