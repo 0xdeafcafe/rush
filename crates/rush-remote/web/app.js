@@ -700,7 +700,9 @@ function sessionScreen(id, init) {
     fillChanges($('#chgbody', d));
   };
 
-  const down = () => { if (stick) scrollTo(0, document.body.scrollHeight); };
+  // batch: a replay is being drawn in one go, and scrolls once at its end
+  let batch = false;
+  const down = () => { if (stick && !batch) scrollTo(0, document.body.scrollHeight); };
   // Only a scroll up lets go of the bottom. Our own scrollTo moves down, and
   // its event can land after more of the log is drawn, when the page is no
   // longer at the bottom: read as a scroll, that left a load at the top.
@@ -1197,25 +1199,64 @@ function sessionScreen(id, init) {
 
   // the stream: the conversation's live end, with the transcript's end
   // before it. What it sends is kept in evts, drawn into the log.
-  let es = null;
+  //
+  // A `reset` says what follows is the conversation again: at opening, when
+  // its host comes or goes, when the connection was lost and found. That
+  // replay is taken in off the page and drawn in one go once the stream goes
+  // quiet, so the page never runs through its history; and when it's the
+  // one already drawn, nothing is drawn at all. Either way a reader keeps
+  // their place, an opened step stays open, and a card half filled in stays.
+  let es = null, re = null, drawn = null;
   const clearAll = () => {
     log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; decEl = null; tasks.clear(); calls.clear();
     live = null; plan = null; evts = []; lo = 0; cursor = null; more = false; seenIds.clear();
   };
+  const settle = () => {
+    const b = re;
+    re = null; clearTimeout(b.t); clearTimeout(b.cap);
+    if (!sc.live) return;
+    const sum = b.raw.join('\n');
+    if (sum === drawn) { for (const e of b.buf) if (e.t === 'info') apply(e, false, -1, null); return; }
+    const open = new Set([...calls].filter(([, c]) => c.open).map(([k]) => k));
+    const fromEnd = document.body.scrollHeight - scrollY, was = stick, card = decEl;
+    batch = true;
+    clearAll();
+    if (card) { decEl = card; $('#asks').append(card); }
+    for (const e of b.buf) { evts.push(e); apply(e, false, evts.length - 1, null); }
+    open.forEach(k => { const c = calls.get(k); if (c) c.open = true; });
+    batch = false; drawn = sum;
+    trim();
+    stick = was;
+    scrollTo(0, was ? document.body.scrollHeight : Math.max(0, document.body.scrollHeight - fromEnd));
+    if (tab === 'shells') drawShells();
+  };
   const stream = () => {
     if (es) es.close();
-    clearAll();
+    drawn = null;
     es = new EventSource(base + `/api/sessions/${encodeURIComponent(id)}/events`);
     es.onmessage = m => {
       if (!sc.live) return;
       const e = JSON.parse(m.data);
-      if (e.t === 'reset') return clearAll();
+      if (e.t === 'reset') {
+        if (re) clearTimeout(re.t); else re = {cap: setTimeout(settle, 2500)};
+        re.buf = []; re.raw = []; re.t = setTimeout(settle, 120);
+        return;
+      }
+      if (re) {
+        re.buf.push(e);
+        if (e.t !== 'info') re.raw.push(m.data);
+        // what streams in live behind a replay doesn't hold it back
+        if (e.t !== 'delta') { clearTimeout(re.t); re.t = setTimeout(settle, 120); }
+        return;
+      }
+      if (e.t !== 'info') drawn = null;
       evts.push(e);
       apply(e, false, evts.length - 1, null);
       trim();
       if (tab === 'shells') drawShells(); // its rows are the background's live state
     };
   };
+  sc.on(() => { if (re) { clearTimeout(re.t); clearTimeout(re.cap); } });
   sc.on(() => es && es.close());
   stream();
 }

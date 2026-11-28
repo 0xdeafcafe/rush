@@ -20,7 +20,10 @@ server in front of those hosts. This is the simpler plan that replaced
   - `GET /api/sessions/{id}/events` is a Server-Sent Events stream. A running
     host's lines are decoded and sent as neutral events (`{"t":…,"e":…}`),
     with the host's replay first. A host that isn't running sends its saved
-    transcript tail instead. Reading never wakes a sleeping host. History
+    transcript tail instead, and again only when the transcript has changed:
+    while it's stopped its info changes for much else (a name, a queue,
+    going away), and that sends the `info` alone (`stopped_frames`). Reading
+    never wakes a sleeping host. History
     starts with the transcript's last 600 events (a `cut` event says there's
     more); `?full=1` sends all of it (up to 50,000), which the web app's
     *Show earlier* and `rush remote attach` ask for.
@@ -139,6 +142,12 @@ server in front of those hosts. This is the simpler plan that replaced
     holds as the TUI does: tool calls with their arguments and output,
     files read and edited (a diff), todos, thinking, plans, subagent
     spawns, questions and their answers.
+  - A replay (what follows a `reset`: at opening, when the host comes or
+    goes, when the connection came back) is taken in off the page and drawn
+    in one go once the stream goes quiet, so the page never runs through its
+    history; one that is what's already drawn draws nothing. A reader keeps
+    their place, an opened step stays open, a decisions card stays as filled
+    in.
   - A session carries tabs beside its conversation: its **subagents** (each
     one's status, model and activity, its own conversation a sheet away),
     its **shells** (its tasks and background commands, to stop or read),

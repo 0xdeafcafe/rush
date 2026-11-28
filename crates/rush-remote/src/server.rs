@@ -684,8 +684,9 @@ impl Server {
     /// Streams a session as Server-Sent Events, each {"t":…,"e":…}: rush's
     /// neutral events, and info, answered, sent, error and reset of its
     /// own. A running host gives its replay then what happens; one that
-    /// isn't running gives its saved transcript, and the stream picks the
-    /// host up when something wakes it. Reading never wakes it. History
+    /// isn't running gives its saved transcript (again only when it has
+    /// changed: see stopped_frames), and the stream picks the host up
+    /// when something wakes it. Reading never wakes it. History
     /// starts with the transcript's last HISTORY_MOST events, or with
     /// ?full=1 all of it.
     fn events(&self, r: &Request, id: &str) -> Response {
@@ -701,6 +702,8 @@ impl Server {
                     |w: &mut dyn Write, t: &str, e: &Value| -> bool { sse(w, Some(&tagged(t, e))) };
                 // The info the transcript was shown with.
                 let mut shown: Option<Time> = None;
+                // The transcript the client holds, as stopped_frames keeps it.
+                let mut sent: Option<u64> = None;
                 let mut n = 0u64;
                 loop {
                     let info = match rush_host::read_info(&id) {
@@ -723,19 +726,22 @@ impl Server {
                             if !ok || ctx.done() {
                                 return;
                             }
+                            // What the host said since isn't in sent.
                             shown = None;
+                            sent = None;
                         }
                     } else if shown.is_none_or(|s| s != info.updated_at) {
                         // Polls the info file each second while the host is down.
-                        send(w, "reset", &Value::Null);
-                        send(
-                            w,
-                            "info",
-                            &serde_json::to_value(&info).unwrap_or(Value::Null),
-                        );
+                        let mut history = Vec::new();
                         send_history(&reg, &info, Time::default(), full, &mut |b| {
-                            sse(w, Some(&b));
+                            history.push(b);
                         });
+                        let info_json = serde_json::to_value(&info).unwrap_or(Value::Null);
+                        for f in stopped_frames(&info_json, history, &mut sent) {
+                            if !sse(w, Some(&f)) {
+                                return;
+                            }
+                        }
                         shown = Some(if info.updated_at.is_zero() {
                             Time::from_unix(1, 0)
                         } else {
@@ -1449,6 +1455,31 @@ fn save_pictures(id: &str, ps: &[Picture]) -> Result<Vec<String>, String> {
 /// {"e":e,"t":t}, as Go writes the map.
 fn tagged(t: &str, e: &Value) -> Vec<u8> {
     serde_json::to_vec(&json!({ "t": t, "e": e })).unwrap_or_default()
+}
+
+/// What a stopped session's stream sends when its info has changed: the
+/// info, and around it a reset and the transcript only when that isn't
+/// the one the client already holds (sent, its hash). The info file
+/// changes for much that leaves the conversation as it was (a name, a
+/// queue, going away), and a client that is sent the whole of it again
+/// has to draw the whole of it again.
+pub(crate) fn stopped_frames(
+    info: &Value,
+    history: Vec<Vec<u8>>,
+    sent: &mut Option<u64>,
+) -> Vec<Vec<u8>> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    history.hash(&mut h);
+    let sum = h.finish();
+    let info = tagged("info", info);
+    if *sent == Some(sum) {
+        return vec![info];
+    }
+    *sent = Some(sum);
+    let mut out = vec![tagged("reset", &Value::Null), info];
+    out.extend(history);
+    out
 }
 
 /// The stream's headers.
