@@ -3698,10 +3698,15 @@ is made. Everything below is in `rush_ui::frame`.
   background needn't hold the agent, so the turn is said to wait on one
   only after 30 seconds of nothing, `HELD_AFTER`; until then it's named
   as beside a turn at work); and a turn at work
-  beside a task of the session's that runs on (a command sent to the
-  background, a monitor, a job) ends its facts with `<command> still
-  running <time>`, `and N more` when there are others. A command is named
-  by its first words, past a cd, cut to fit (`command_words`).
+  beside tasks of the session's that run on (a command sent to the
+  background, a monitor, a job) ends its facts with how many of each
+  there are, `2 shells · 1 subagent` (it named the one running longest,
+  `<command> still running <time>`, and `and N more`; the column or the
+  rows under the conversation name each). A command is named by its
+  first words, past a cd, cut to fit (`command_words`). Docked, a
+  command at work is the line's head in its own words and its place in
+  its chain, `✶ cargo clippy · 2 of 9 · 16s` (`command_now`), not
+  "running Bash…"; see "The session screen at a glance".
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched
@@ -3711,23 +3716,30 @@ is made. Everything below is in `rush_ui::frame`.
   it (`Options::paused`) and rush lets them all go on as it quits.
   In the conversation (`render::draw::chain`), a chain that runs is a
   list of its steps under the step's row (`chain_list`; Rust-only, Go drew
-  the command's whole text): a row for each command with how it stands
-  (`Session::part_marks`, partMarks: ✓ and how long it took, the spinner,
-  how long it has run and the process busy under it, ⏸ paused, ✗ where it
-  failed, ○ not started), the last two lines printed under the one
-  running, then one row of keys, `▸ enter opens it · x stops the chain`
-  (with "↑ pick this step, then" until it's picked). A heredoc's lines
+  the command's whole text): about five rows round the command running
+  now. Those done before it have a row each, the two latest (✓ and how
+  long it took; `Session::part_marks`, partMarks), the earlier ones
+  counted on one row ("✓ 3 commands before"), one that failed always its
+  own (✗); the one running has the spinner, how long it has run and the
+  process busy under it (⏸ paused), and the last two lines printed under
+  it; those not started are named on one row, as many as fit, then how
+  many more (`○ update-buck --check   ○ git merge origin/master  +4`).
+  It was a row a command, so a chain of fourteen took the page. Picked,
+  one row of keys closes it, `▸ enter opens it · x stops the chain`; not
+  picked, none (it said "↑ pick this step, then" under every running
+  chain). A heredoc's lines
   fold into the command's name (`python3 (59-line script)`), a pipeline is
   named by the command it starts with, and a name is cut to the width. k
   and p are in the hints at the foot of the screen. The step's row leaves
   out the place while the list shows. Enter opens the call as written, as
   a finished one is drawn and as Go drew a running one: the row says its
   place (`2/3 cargo test`, runningPart), each command has its time beside
-  it, and under the commands a row of all the keys: k skips the command
-  running now, x stops the whole chain, p pauses (new in the Rust port,
-  Go showed them only in the hint row). A loop, an if and a script file
-  keep that drawing while they run. Code's check line says the place too,
-  Chat's bubble foot names it; Code shows the keys.
+  it, and, while the step is picked, a row of all the keys under the
+  commands: k skips the command running now, x stops the whole chain, p
+  pauses (new in the Rust port, Go showed them only in the hint row). A
+  loop, an if and a script file keep that drawing while they run. Code's
+  check line says the place too, Chat's bubble foot names it; Code shows
+  the keys on the step picked.
   A process that fits two commands of the chain equally (step 3's
   `| grep -n "a b"` beside step 2's `grep -n`) went to the earlier one
   (partOf's rule), so the chain said step 2 ran, from when step 3's
@@ -4374,6 +4386,25 @@ at):
   and "⌥←→ the side's width" are in the help (f1) only; with nothing
   typed the row has room for four of the box's and the screen's own
   keys (tab the side, ↑ steps) before f1 and esc (`dock::hint`).
+- **What runs now is said once, on the live line.** It was said five
+  ways: the header's "working · 27s", the live line's "running Bash…
+  16s", the column's "Running  1 step", the step's own row and "Shell  2
+  running". The line docked above the box is the one place
+  (`render::draw live_line`): a command at work in its own words and its
+  place in its chain, then the turn's time and what runs beside it,
+  counted: "✶ cargo clippy · 2 of 9 · 16s   turn 27s · 2 shells · 1
+  subagent · ↓ 312 tokens". The header keeps the state's word and the
+  turn's time. The column's Running part leaves out a step whose own row
+  is on screen (`side::tools`, by `SessionView::shown`), unless it waits
+  for you; scrolled away or folded into a row of several, it's listed.
+- **Hints follow what has the keys, and live at the foot.** A running
+  chain's row of keys shows on the step picked only; the column's heads
+  say no "↑ pick one to watch" or "↑ pick one to stop" (tab brings the
+  keys to the column, and the hint row then says ↑↓ pick · enter open);
+  under the box, where ↑ lands on those rows, they still do
+  (`running::running_preview`, `jobs_block`, by `Ctx::whole`). A
+  notice's link to the step that started its task says "enter · its
+  step" on the row picked, not "↑ its step" on every one.
 
 ## Conversation views (Rust-only)
 

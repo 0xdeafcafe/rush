@@ -638,8 +638,8 @@ fn k_kills_and_p_pauses_the_chains_command() {
 }
 
 /// A running chain in the conversation is a list of its commands, each
-/// with how it stands, and under them one row of keys; k skips the
-/// command running now, x stops the whole chain through the host.
+/// with how it stands, and, picked, one row of keys under them; k skips
+/// the command running now, x stops the whole chain through the host.
 #[test]
 fn a_running_chain_says_where_it_is_and_k_and_x_act() {
     let d = tempfile::tempdir().unwrap();
@@ -662,8 +662,9 @@ fn a_running_chain_says_where_it_is_and_k_and_x_act() {
     assert!(!vet.contains('$'), "{vet}");
     assert!(got.contains("go test ./internal/ui"), "{got}");
     assert!(got.contains("○ echo ok"), "{got}");
+    // No row of keys until it's picked: they do nothing before.
     assert!(
-        got.contains("▸ ↑ pick this step, then  enter opens it · x stops the chain"),
+        !got.contains("pick this step") && !got.contains("x stops the chain"),
         "{got}"
     );
     pick(&mut m, "t1:s:tck");

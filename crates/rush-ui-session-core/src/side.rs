@@ -186,12 +186,19 @@ fn step_what(s: &Session, st: &Step, dir: &str) -> (String, String) {
 /// does, and how long it's been at it or that it waits for you; each
 /// row's ref. Its subagents and their steps, workflows and background
 /// tasks are parts of their own (running.rs). Nothing when none runs.
+///
+/// One whose own row is on screen (in_sight, by its ref "t4:s:toolu_…")
+/// is left out, unless it waits for you: that row spins with its time,
+/// and the live line under the conversation names it, so here it was
+/// the same step said a third time. Scrolled away, or folded into a row
+/// of several steps, it is listed (Rust-only).
 pub fn tools(
     s: &Session,
     spin: &dyn Fn(usize) -> Span,
     dir: &str,
     now: Ms,
     w: usize,
+    in_sight: &dyn Fn(&str) -> bool,
 ) -> (Vec<Line>, Vec<String>) {
     let Some(t) = s.live() else {
         return (Vec::new(), Vec::new());
@@ -208,6 +215,7 @@ pub fn tools(
                 && matches!(st.status, Status::Running | Status::Waiting)
                 && st.kind != Kind::Subagent
                 && !st.call().input.background
+                && (st.status == Status::Waiting || !in_sight(&format!("t{}:s:{}", t.n, st.id)))
         })
         .collect();
     if at_work.is_empty() {
@@ -690,7 +698,10 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         Some(v) => {
             let reg = &m.reg;
             let spin = |i: usize| crate::look::spin_of(reg, &kind, tick + i);
-            tools(&v.sess, &spin, &dir, now, tw)
+            // The rows on screen as last drawn; before the first frame,
+            // the conversation's end, where the turn under way is.
+            let in_sight = |r: &str| v.shown.is_empty() || v.shown.iter().any(|s| s == r);
+            tools(&v.sess, &spin, &dir, now, tw, &in_sight)
         }
         None => (Vec::new(), Vec::new()),
     };

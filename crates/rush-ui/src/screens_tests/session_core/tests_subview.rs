@@ -1077,7 +1077,10 @@ fn a_working_run_shows_its_working_line() {
     subview::pick_run(&mut m, KEY, "w");
     let _ = m.frame();
     let got = text(&m.frame());
-    assert!(got.contains("· running Bash…"), "no working line:\n{got}");
+    assert!(
+        got.contains("· cargo test · 36s  turn 56s"),
+        "no working line:\n{got}"
+    );
     assert!(got.contains("· check the port's tests"), "its head:\n{got}");
     assert!(got.contains("to check the port's tests"), "its box:\n{got}");
     m.session.as_mut().unwrap().sess.apply(
@@ -1090,7 +1093,7 @@ fn a_working_run_shows_its_working_line() {
         NOW,
     );
     let got = text(&m.frame());
-    assert!(!got.contains("running Bash"), "finished:\n{got}");
+    assert!(!got.contains("· cargo test · "), "finished:\n{got}");
 }
 
 /// What the picked run follows, by id: None when nothing is.

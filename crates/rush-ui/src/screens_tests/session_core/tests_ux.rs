@@ -345,6 +345,25 @@ pub(super) fn busy(w: usize, h: usize) -> Model {
         vec![shell("c1", CHAIN, "Clippy touched crates, then push")],
         NOW - 16_000,
     );
+    // The chain's shell, as the machine's processes show it: cargo
+    // clippy runs under it, so the second of its nine commands does.
+    s.watch_shells(
+        &[rush_convo::Shell {
+            cmd: format!("/bin/zsh -c {CHAIN}"),
+            command: CHAIN.into(),
+            start: NOW - 16_000,
+            kids: vec![rush_convo::ShellProc {
+                pid: 900,
+                args: "cargo clippy -p d3d -p render-bridge -p game -- -D warnings"
+                    .split(' ')
+                    .map(String::from)
+                    .collect(),
+                start: NOW - 15_600,
+                kids: Vec::new(),
+            }],
+        }],
+        NOW,
+    );
     v.read = true;
     m.sel = KEY.into();
     m.agents = vec![a];
@@ -400,6 +419,67 @@ fn the_busy_session_draws() {
         let f = drawn(&mut m);
         assert!(f.contains("Drive Faster Coordination"), "{f}");
     }
+}
+
+/// What runs now is said once, on the live line, in the command's own
+/// words and where its chain is; what runs beside it is counted there.
+/// The column doesn't list a step whose row is in sight.
+#[test]
+fn what_runs_is_said_once() {
+    let mut m = busy(200, 56);
+    let f = drawn(&mut m);
+    assert!(
+        f.contains("cargo clippy · 2 of 9 · 16s  turn 27s · 1 shell"),
+        "{f}"
+    );
+    for not in ["running Bash", "still running", "▌ Running"] {
+        assert!(!f.contains(not), "says {not:?}:\n{f}");
+    }
+    // The shell beside the turn is still named in the column.
+    assert!(f.contains("▌ Shell  1 running"), "{f}");
+}
+
+/// A running chain is about five rows round the command running now, not
+/// a row a command: what's done, what runs, and one row for the rest.
+#[test]
+fn a_running_chain_is_a_few_rows() {
+    let mut m = busy(200, 56);
+    let f = drawn(&mut m);
+    let rows: Vec<&str> = f.lines().collect();
+    let at = rows
+        .iter()
+        .position(|r| r.contains("✓ cd /src/halo/d3d-frame-tail"))
+        .unwrap_or_else(|| panic!("{f}"));
+    assert!(rows[at + 1].contains("cargo clippy -p d3d"), "{f}");
+    assert!(
+        rows[at + 2].contains(
+            "○ update-buck --check   ○ git merge origin/master   ○ git push origin HEAD  +4"
+        ),
+        "{f}"
+    );
+    assert!(!f.contains("./boot.sh 05a_citadel"), "{f}");
+}
+
+/// The keys are in the row at the foot, for what has them: no "↑ pick
+/// this step, then…" under a chain nothing picked, no "↑ pick one to
+/// stop" on the column's heads; picked, the step's own keys are there.
+#[test]
+fn hints_follow_what_has_the_keys() {
+    let mut m = busy(200, 56);
+    let f = drawn(&mut m);
+    for not in ["pick this step", "pick one to", "x stops the chain"] {
+        assert!(!f.contains(not), "says {not:?}:\n{f}");
+    }
+    let foot = f.lines().last().unwrap();
+    assert!(
+        foot.contains("tab the side") && foot.contains("↑ steps") && foot.contains("f1 more"),
+        "{foot}"
+    );
+    m.session.as_mut().unwrap().sel = "t3:s:c1".into();
+    let f = drawn(&mut m);
+    assert!(f.contains("enter opens it · x stops the chain"), "{f}");
+    let foot = f.lines().last().unwrap();
+    assert!(foot.contains("x stop this command"), "{foot}");
 }
 
 fn file(path: &str, add: i64, del: i64) -> super::changes::FileChange {

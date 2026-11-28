@@ -260,7 +260,11 @@ pub fn running_preview(
             }
             _ => Line::new(),
         }
-    } else if c.focus && c.idle_box {
+    } else if c.focus && c.idle_box && !c.whole {
+        // Under the box, where ↑ from it lands on these rows. In the
+        // column beside the conversation ↑ goes to the steps, and tab
+        // brings the keys here: the hint row says so, not each part's
+        // head (Rust-only).
         keys(&[("↑", "pick one to watch")])
     } else {
         Line::new()
@@ -480,7 +484,9 @@ pub fn sub_kind(c: &Ctx, sa: &Subagent) -> String {
 /// heading and a row each, with each row's ref (jobsPreview).
 pub fn jobs_block(c: &Ctx, jobs: &[&Job], w: usize) -> (Vec<Line>, Vec<String>) {
     let fg = jobs.iter().any(|j| !j.background);
-    let hint = if c.focus && fg {
+    let hint = if c.whole {
+        Line::new() // the column's keys are on the hint row
+    } else if c.focus && fg {
         keys(&[("ctrl+b", "background"), ("↑", "pick")])
     } else if c.focus && c.idle_box {
         keys(&[("↑", "pick one to stop")])

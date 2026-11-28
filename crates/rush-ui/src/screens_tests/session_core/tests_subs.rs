@@ -708,7 +708,7 @@ fn running_tools_by_what_they_do() {
     let mut s = Session::new();
     t.read(&mut s).unwrap();
     let spin = |_: usize| rush_core::text::Span::plain("*");
-    let (ls, _) = super::side::tools(&s, &spin, "", NOW, 60);
+    let (ls, _) = super::side::tools(&s, &spin, "", NOW, 60, &|_| false);
     let got = text(&ls);
     assert!(!got.contains("mcp__"), "{got}");
     assert!(got.contains("telling an agent"), "{got}");
