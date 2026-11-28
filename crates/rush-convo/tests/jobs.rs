@@ -273,7 +273,7 @@ fn exchange_replay_folds_and_keeps_origin() {
         ..Options::default()
     };
     let open = render(&s, &o);
-    for want in ["◇ Reviewer from", "◇ Builder to", "last line"] {
+    for want in ["◇ Reviewer from", "→ this session", "last line"] {
         assert!(open.contains(want), "missing {want:?} in {open}");
     }
     let mut o = o;

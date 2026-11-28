@@ -5463,13 +5463,26 @@ fn news_rows(run: &[&Exchange]) -> Vec<(String, Txt, String)> {
 }
 
 /// Who sent a message to whom, each half the room (exchange.go:198).
+///
+/// The end that is the conversation you're reading is "this session"
+/// (Rust-only: Go named it, cut to half the row like the other, so the
+/// title already over the conversation took the room the peer's name
+/// needed); the other end has the rest.
 fn exchange_who(e: &Exchange, width: usize) -> Txt {
-    let half = width.saturating_sub(3) / 2;
-    exchange_peer_txt(&e.sender, half)
-        .and_raw(" ")
-        .and(paint(C_BLUE, "→"))
-        .and_raw(" ")
-        .and(exchange_peer_txt(&e.receiver, half))
+    const HERE: &str = "this session";
+    let here = dim(HERE);
+    let arrow = Txt::raw(" ").and(paint(C_BLUE, "→")).and_raw(" ");
+    let rest = width.saturating_sub(3 + HERE.len());
+    match e.direction.as_str() {
+        "received" if rest >= 8 => exchange_peer_txt(&e.sender, rest).and(arrow).and(here),
+        "sent" if rest >= 8 => here.and(arrow).and(exchange_peer_txt(&e.receiver, rest)),
+        _ => {
+            let half = width.saturating_sub(3) / 2;
+            exchange_peer_txt(&e.sender, half)
+                .and(arrow)
+                .and(exchange_peer_txt(&e.receiver, half))
+        }
+    }
 }
 
 /// One end of a message: its mark, its name, and the start of its
