@@ -37,4 +37,4 @@
 ╭─ new agent in checkout ───────╮│  ╭─ retired · handed over to move the design tokens to CSS v… · enter opens it ────╮
 │ ❯ esc or ← to come back here  ││  │ ❯  read-only: what's typed here goes nowhere                                    │
 ╰───────────────────────────────╯│  ╰─────────────────────────────────────────────────────────────────────────────────╯
-  retired: it takes no messages …│    ↑ steps  ·  f1 more  ·  ⌥s conversation view  ·  esc back
+  retired: it takes no messages …│    ↑ steps  ·  f1 more  ·  esc back

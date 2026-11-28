@@ -191,7 +191,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // for the whole width would lose their ends under it.
     let beside_run = !conn(m, key).side.run.is_empty();
     let run_w = conn(m, key).side.w;
-    let wide = conn(m, key).side.rows.is_empty() && !beside_run;
+    let wide = conn(m, key).side.rows.is_empty() && !conn(m, key).side.blank && !beside_run;
     // A run open where the column isn't its: framed under its step, the
     // conversation laid out the frame's rows shorter so its end still
     // shows (openrun.rs).
@@ -360,7 +360,7 @@ fn splice_peek(
         .map_or(n, |i| i + 1);
     // The column beside, while it shows, keeps its room.
     let side = conn(m, key).side.w;
-    let fw = if side > 0 && !conn(m, key).side.rows.is_empty() {
+    let fw = if side > 0 && (!conn(m, key).side.rows.is_empty() || conn(m, key).side.blank) {
         cw.saturating_sub(side + 3)
     } else {
         cw

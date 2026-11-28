@@ -10,9 +10,11 @@
 //! transcript, beside the newest turn; here it runs from the top down,
 //! the decisions not answered first, then the session's own tools at
 //! work and its subagents', workflows and background tasks (running.rs),
-//! the task list, the changes, and the folded views last. Running,
-//! Decisions and Changes always show, quiet when there's nothing in
-//! them, so the column reads as one and its parts don't jump about.
+//! the task list, the changes, and the folded views last. A part with
+//! nothing in it isn't drawn: "Decisions  none open" in the column's
+//! first rows said nothing where the eye lands first, so what's there
+//! is what needs you or runs, and a column with nothing to say gives
+//! its room back to the conversation.
 //!
 //! The session's views, open, take the room instead (views_beside): the
 //! agent asked to show them, and what runs is drawn at their top then
@@ -52,12 +54,6 @@ pub const DECISIONS_REF: &str = "side:dec:";
 /// A click on a tool at work picks its row in the conversation: the
 /// row's ref follows ("t4:s:toolu_…").
 pub const STEP_REF: &str = "side:step:";
-
-/// A part with nothing in it, w wide: its heading and what it would say,
-/// quiet, so the column keeps its shape.
-pub fn quiet_part(name: &str, says: &str, w: usize) -> Vec<Line> {
-    vec![fit(side_head(name, line([faint(says)])), w)]
-}
 
 /// The decisions not answered, in the column, w wide: the newest block's
 /// decisions a row each, the agent's suggestion beside each (☆, as the conversation marks it), and how many
@@ -309,24 +305,40 @@ pub fn tasks(s: &Session, w: usize) -> Vec<Line> {
 
 /// What the session changed, in the column, w wide: its adds and deletes,
 /// then the five files it changed most, and each row's ref. Nothing when
-/// it hasn't edited a file (sideChanges).
+/// it hasn't edited a file (sideChanges). A file with no lines counted
+/// (one a command touched, its change not read) has no row: a list of
+/// "+0" said nothing, five times. They're counted on the head instead,
+/// "356 touched, no line changes" when none has lines (Rust-only).
 pub fn changes(files: &[FileChange], stat: Line, dir: &str, w: usize) -> (Vec<Line>, Vec<String>) {
     if files.is_empty() {
         return (Vec::new(), Vec::new());
     }
+    let mut most: Vec<&FileChange> = files.iter().filter(|f| f.add + f.del > 0).collect();
+    let touched = files.len() - most.len();
+    let said = stat.width() > 0;
     let mut head = side_head("Changes", stat);
-    if files.len() > 1 {
+    if most.is_empty() {
+        head.spans.push(dim(format!(
+            "{}{} touched, no line changes",
+            if said { " · " } else { "" },
+            plural(touched, "file")
+        )));
+    } else if files.len() > 1 {
         head.spans.push(dim(format!(" · {} files", files.len())));
     }
     let mut out = vec![fit(head, w)];
     let mut refs = vec![CHANGES_REF.to_string()];
-    let mut most: Vec<&FileChange> = files.iter().collect();
     most.sort_by_key(|f| std::cmp::Reverse(f.add + f.del));
     const SHOWN: usize = 5;
     for fc in most.iter().take(SHOWN) {
-        let mut stat = line([sp(format!("+{}", fc.add), GREEN)]);
+        let mut stat = Line::new();
+        if fc.add > 0 {
+            stat.spans.push(sp(format!("+{}", fc.add), GREEN));
+        }
         if fc.del > 0 {
-            stat.spans.push(plain(" "));
+            if fc.add > 0 {
+                stat.spans.push(plain(" "));
+            }
             stat.spans.push(sp(format!("−{}", fc.del), RED));
         }
         let mut path = fc.path.as_str();
@@ -343,8 +355,17 @@ pub fn changes(files: &[FileChange], stat: Line, dir: &str, w: usize) -> (Vec<Li
         out.push(spread(left, stat, w));
         refs.push(format!("{CHANGES_REF}:{}", fc.path));
     }
-    if files.len() > SHOWN {
-        out.push(line([faint(format!("   +{} more", files.len() - SHOWN))]));
+    // What's left: more files with lines, then those with none.
+    let more = most.len().saturating_sub(SHOWN);
+    let rest = match (more, touched) {
+        _ if most.is_empty() => String::new(),
+        (0, 0) => String::new(),
+        (n, 0) => format!("+{n} more"),
+        (0, t) => format!("+{t} touched, no line changes"),
+        (n, t) => format!("+{n} more · {t} touched, no line changes"),
+    };
+    if !rest.is_empty() {
+        out.push(line([dim(format!("   {rest}"))]));
         refs.push(CHANGES_REF.to_string());
     }
     (out, refs)
@@ -367,6 +388,10 @@ pub struct Side {
     pub w: usize,
     /// The most it could be at this width; 0 when it isn't showing.
     pub room: usize,
+    /// It has its room beside the conversation and nothing to say: no
+    /// rows are drawn, and the conversation keeps to its own width all
+    /// the same, so its rows don't move when a part comes or goes.
+    pub blank: bool,
     /// Its first screen row and column as drawn, and how many rows showed.
     pub y: usize,
     pub x: usize,
@@ -588,9 +613,9 @@ pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
 /// The column for session key, text w wide, its parts a row apart, top
 /// down: the decisions not answered (yellow), the session's own tools at
 /// work (orange) and what else runs (side_runs), the tasks (orange), the
-/// changes (green), the folded views. Running, Decisions and Changes
-/// show quiet when empty. Empty unless the conversation shows and
-/// there's room. Returns whether the tasks went in it.
+/// changes (green), the folded views. A part with nothing in it isn't
+/// drawn. Empty unless the conversation shows and there's room. Returns
+/// whether the tasks went in it.
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // The room is right of the text, left of any views beside it.
     let (sw, room) = room_beside(m, key, w);
@@ -653,16 +678,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // card, its answer not landed yet, no longer waits.
     let open = open_decisions(m, key);
     let (rows, refs) = decisions(&open, tw);
-    if rows.is_empty() {
-        part(
-            &mut side,
-            FAINT,
-            quiet_part("Decisions", "none open", tw),
-            Vec::new(),
-        );
-    } else {
-        part(&mut side, YELLOW, rows, refs);
-    }
+    part(&mut side, YELLOW, rows, refs);
 
     // What runs: the session's own tools at work, then its subagents,
     // workflows and background tasks, each a part of its own.
@@ -680,26 +696,20 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     };
     if rows.is_empty() && runs.is_empty() {
         // Its runs drawn elsewhere (the views panel), or not read yet:
-        // what its conversation says runs, as the header says it, never
-        // "nothing now" while the header says three run (Rust-only).
+        // what its conversation says runs, as the header says it
+        // (Rust-only). Nothing running, no part.
         let lanes = m
             .session
             .as_ref()
             .filter(|v| v.key == key)
             .and_then(|v| crate::look::session_lanes(&v.sess));
-        match lanes {
-            Some(l) => part(
+        if let Some(l) = lanes {
+            part(
                 &mut side,
                 ORANGE,
                 vec![fit(side_head("Running", line([dim(l)])), tw)],
                 Vec::new(),
-            ),
-            None => part(
-                &mut side,
-                FAINT,
-                quiet_part("Running", "nothing now", tw),
-                Vec::new(),
-            ),
+            );
         }
     }
     part(&mut side, ORANGE, rows, refs);
@@ -729,16 +739,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         let files = super::changes::project_changes(m).0;
         let stat = super::views::tab_stat(m, key, "changes");
         let (rows, refs) = changes(&files, stat, &dir, tw);
-        if rows.is_empty() {
-            part(
-                &mut side,
-                FAINT,
-                quiet_part("Changes", "none yet", tw),
-                Vec::new(),
-            );
-        } else {
-            part(&mut side, GREEN, rows, refs);
-        }
+        part(&mut side, GREEN, rows, refs);
     }
 
     // Folded views are the column's last part, not a strip of their own.
@@ -768,6 +769,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         }
     }
     side.top = side.top.min(side.most());
+    side.blank = side.rows.is_empty();
     conn(m, key).side = side;
     beside
 }

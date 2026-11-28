@@ -334,7 +334,12 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     // Filling the screen: nothing says the list is behind it but this.
     // Beside the list, or in a hosted view with no list behind it, it
     // isn't said (rushmode.go:3028 paneAlone).
-    if !m.in_pane && !(m.ext.calls.hosted_alone())(m) {
+    // Nor while esc does something else: with a turn it can stop, or
+    // something typed to clear, the hint row says what esc does now,
+    // and a chip here saying "back to the list" beside "esc stop the
+    // turn" under the box said two things of one key (Rust-only).
+    let esc_back = !super::keys::can_interrupt(m, &key) && conn(m, &key).input.is_empty();
+    if esc_back && !m.in_pane && !(m.ext.calls.hosted_alone())(m) {
         chips.spans.push(sp("esc", TEXT));
         chips.spans.push(sp(" back to the list", DIM));
         chips.spans.push(plain(" "));

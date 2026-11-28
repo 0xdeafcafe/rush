@@ -410,10 +410,10 @@ fn the_stash_from_the_session() {
     );
     assert!(conn(&mut m, KEY).input.is_empty(), "set aside");
     let f = screen(&mut m).join("\n");
-    assert!(
-        f.contains("a message for this agent · ctrl+r history"),
-        "{f}"
-    );
+    // The empty box says three words; the history's key is in the keys
+    // under it and in the help.
+    assert!(f.contains("❯  message this agent"), "{f}");
+    assert!(!f.contains("message this agent · "), "{f}");
     press(&mut m, "ctrl+/");
     assert_eq!(
         conn(&mut m, KEY).input.string(),

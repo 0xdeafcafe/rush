@@ -145,7 +145,7 @@ pub fn project_changes(m: &mut Model) -> (Changed, Changed) {
     }
     let mut root = tree_of(m, &dir).root;
     if root.is_empty() {
-        root = dir;
+        root.clone_from(&dir);
     }
     if let Some((of, r, p, o)) = &m.kept::<Trees>().split
         && Arc::ptr_eq(of, &all)
@@ -153,11 +153,47 @@ pub fn project_changes(m: &mut Model) -> (Changed, Changed) {
     {
         return (p.clone(), o.clone());
     }
-    let (p, o): (Vec<FileChange>, Vec<FileChange>) =
-        all.iter().cloned().partition(|fc| inside(&root, &fc.path));
+    let (p, o): (Vec<FileChange>, Vec<FileChange>) = all
+        .iter()
+        .cloned()
+        .partition(|fc| mine(&root, &dir, &fc.path));
     let (p, o) = (Arc::new(p), Arc::new(o));
     m.kept::<Trees>().split = Some((all, root, p.clone(), o.clone()));
     (p, o)
+}
+
+/// Whether path is the project's own: in root, and not in a checkout
+/// of another branch kept inside it (a worktree under .claude/worktrees
+/// or .worktrees) that the session, working in dir, isn't in. A shell
+/// command run from the main checkout that touched another session's
+/// worktree was counted as this one's change to the project, a folder
+/// of someone else's work among its files (Rust-only).
+pub fn mine(root: &str, dir: &str, path: &str) -> bool {
+    inside(root, path) && !in_other_worktree(root, dir, path)
+}
+
+/// Where worktrees are kept inside a checkout.
+const WORKTREES: [&str; 2] = [".claude/worktrees/", ".worktrees/"];
+
+fn in_other_worktree(root: &str, dir: &str, path: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    let rel = match path.strip_prefix(root) {
+        Some(r) if path.starts_with('/') => r.trim_start_matches('/'),
+        _ if path.starts_with('/') => return false,
+        _ => path.trim_start_matches("./"),
+    };
+    let Some((held, rest)) = WORKTREES
+        .iter()
+        .find_map(|w| rel.strip_prefix(w).map(|r| (*w, r)))
+    else {
+        return false;
+    };
+    let name = rest.split('/').next().unwrap_or_default();
+    if name.is_empty() {
+        return false;
+    }
+    let tree = format!("{root}/{held}{name}");
+    !(dir == tree || dir.strip_prefix(&tree).is_some_and(|r| r.starts_with('/')))
 }
 
 /// Edits shared between the frames that draw them.
@@ -177,9 +213,9 @@ pub fn project_count(m: &mut Model) -> ((i64, i64), usize) {
     }
     let mut root = tree_of(m, &dir).root;
     if root.is_empty() {
-        root = dir;
+        root.clone_from(&dir);
     }
-    count(all.iter().filter(|fc| inside(&root, &fc.path)))
+    count(all.iter().filter(|fc| mine(&root, &dir, &fc.path)))
 }
 
 /// s's edits in its project only, as project_changes splits them, read
@@ -194,8 +230,8 @@ pub fn project_count_of(m: &Model, s: &Session) -> ((i64, i64), usize) {
         .and_then(|t| t.by_dir.get(&dir))
         .map(|t| t.root.clone())
         .filter(|r| !r.is_empty())
-        .unwrap_or(dir);
-    let mine = |fc: &&FileChange| root.is_empty() || inside(&root, &fc.path);
+        .unwrap_or_else(|| dir.clone());
+    let mine = |fc: &&FileChange| root.is_empty() || mine(&root, &dir, &fc.path);
     // The open session's steps have the agents they ran under them; its
     // edits as of_open last worked them out, when they still are (each
     // frame's header reads them first). Worked out again each time, a

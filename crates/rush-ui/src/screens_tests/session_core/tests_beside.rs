@@ -333,6 +333,7 @@ fn list_says_the_views_summary() {
 fn the_column_and_the_views_are_one_width() {
     for (i, w) in [200usize, 240, 300].into_iter().enumerate() {
         let mut m = rush_open(&format!("vb-same-a{i}"), w, 40, Vec::new());
+        a_task(&mut m); // a column with nothing in it isn't drawn
         screen(&mut m);
         let col = {
             let side = &conn(&mut m, KEY).side;
@@ -352,6 +353,16 @@ fn the_column_and_the_views_are_one_width() {
 }
 
 /// The column's width as last drawn.
+/// A task on the session's list: something for the column to show.
+fn a_task(m: &mut Model) {
+    sess(m).tasks = vec![rush_convo::Task {
+        id: "1".into(),
+        subject: "Tidy the parser".into(),
+        active: "Tidying the parser".into(),
+        status: "in_progress".into(),
+    }];
+}
+
 fn column_w(m: &mut Model) -> usize {
     screen(m);
     conn(m, KEY).side.w
@@ -426,22 +437,18 @@ fn alt_arrows_with_text_jump_a_word() {
     assert_eq!(m.cfg.column_width, 0);
 }
 
-/// Under the box, the hint names the key to the conversation's view, and
-/// it is the first to go when the row is too narrow.
+/// Under the box, the hint keeps to what's on screen now: the key to
+/// the conversation's views is in the help (f1), not said on every
+/// frame.
 #[test]
-fn the_box_hints_the_conversation_view_key() {
-    let mut m = rush_open("ak-hint", 120, 40, Vec::new());
-    let f = screen(&mut m);
-    let last = f[f.len() - 1].clone();
-    assert!(
-        last.contains("⌥s conversation view  ·  esc back"),
-        "{last:?}"
-    );
-    let mut m = rush_open("ak-hint-narrow", 60, 24, Vec::new());
-    let f = screen(&mut m);
-    let last = f[f.len() - 1].clone();
-    assert!(!last.contains("conversation view"), "{last:?}");
-    assert!(last.contains("esc back"), "{last:?}");
+fn the_box_leaves_the_conversation_view_key_to_the_help() {
+    for (id, w, h) in [("ak-hint", 120, 40), ("ak-hint-narrow", 60, 24)] {
+        let mut m = rush_open(id, w, h, Vec::new());
+        let f = screen(&mut m);
+        let last = f[f.len() - 1].clone();
+        assert!(!last.contains("conversation view"), "{last:?}");
+        assert!(last.contains("f1 more  ·  esc back"), "{last:?}");
+    }
 }
 
 /// The pointer over the side column, level with a turn of the
@@ -450,6 +457,7 @@ fn the_box_hints_the_conversation_view_key() {
 #[test]
 fn hover_stays_out_of_the_side_column() {
     let mut m = rush_open("vb-hover", 220, 50, Vec::new());
+    a_task(&mut m);
     let f = screen(&mut m);
     let (sx, sy, shown) = {
         let side = &conn(&mut m, KEY).side;
@@ -663,21 +671,14 @@ fn open_views_take_the_columns_place() {
     assert!(!f.contains("▌ Decisions"), "{f}");
 }
 
-/// Under the box, with the column showing and nothing typed, the hint
-/// says alt+arrows resize it; typing, or with no column, it doesn't.
+/// Under the box, with the column showing, the keys that resize it
+/// aren't said: they're in the help (f1), and its edge drags.
 #[test]
-fn the_box_hints_the_columns_width_keys() {
+fn the_box_leaves_the_columns_width_keys_to_the_help() {
     let mut m = very_wide("cw-hint", 0, Vec::new());
     let f = screen(&mut m);
+    assert!(conn(&mut m, KEY).side.shown > 0, "the column shows");
     let last = f[f.len() - 1].clone();
-    assert!(
-        last.contains("⌥s conversation view  ·  ⌥←→ the side's width  ·  esc back"),
-        "{last:?}"
-    );
-    typed(&mut m, "x");
-    let f = screen(&mut m);
-    assert!(!f[f.len() - 1].contains("the side's width"), "typing");
-    let mut m = rush_open("cw-hint-narrow", 120, 40, Vec::new());
-    let f = screen(&mut m);
-    assert!(!f[f.len() - 1].contains("the side's width"), "no column");
+    assert!(last.contains("f1 more  ·  esc back"), "{last:?}");
+    assert!(!last.contains("the side's width"), "{last:?}");
 }

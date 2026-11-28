@@ -1618,16 +1618,9 @@ fn dock_frames() {
             w - 1,
             "{w}: the box is Go's pane, the width less 3, from column 2"
         );
-        assert!(
-            f[n - 3].contains("❯  a message for this agent"),
-            "{w}: {f:?}"
-        );
+        assert!(f[n - 3].contains("❯  message this agent"), "{w}: {f:?}");
         assert!(f[n - 2].starts_with("  ╰"), "{w}: {f:?}");
-        assert_eq!(
-            f[n - 1].trim_end(),
-            "    f1 more  ·  ⌥s conversation view  ·  esc back",
-            "{w}"
-        );
+        assert_eq!(f[n - 1].trim_end(), "    f1 more  ·  esc back", "{w}");
     }
 }
 
@@ -1749,7 +1742,7 @@ fn dock_keys_at_go_widths() {
         (
             "working",
             120,
-            "ctrl+t what enter does while it works  ·  ↑ rewind  ·  f1 more  ·  ⌥s conversation view  ·  esc stop the turn",
+            "ctrl+t what enter does while it works  ·  ↑ rewind  ·  f1 more  ·  esc stop the turn",
         ),
     ];
     for (st, w, keys) in want {

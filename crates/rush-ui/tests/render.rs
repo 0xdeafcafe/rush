@@ -599,8 +599,8 @@ fn a_rendered_session_counts_its_hosted_agents_changes() {
 }
 
 /// A wide session keeps the conversation at its reading width and runs
-/// the column beside it from the top: the decisions not answered, the
-/// tool at work, what changed. Narrower, there's no column (the 120x40
+/// the column beside it from the top: the decisions not answered (when
+/// any are), the tool at work, what changed. Narrower, there's no column (the 120x40
 /// snapshot). A message of yours after a block, picking from it or not,
 /// leaves it no longer open, in the column as in the conversation.
 #[test]
@@ -636,21 +636,24 @@ fn a_wide_session_has_the_column_beside_it() {
             .position(|r| r.contains(what))
             .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
     };
-    let (dec, run, chg) = (
-        at("Decisions  none open"),
-        at(" Running  1 step"),
-        at("▌ Changes"),
-    );
-    assert!(dec < run && run < chg, "{f}");
+    let (run, chg) = (at(" Running  1 step"), at("▌ Changes"));
+    assert!(run < chg, "{f}");
+    // Its decisions were answered: no part for them, not a quiet one.
     assert!(!f.contains("not answered"), "{f}");
+    assert!(!f.contains("▌ Decisions"), "{f}");
     assert!(rows[run + 1].contains("Run the tests  cargo"), "{f}");
-    assert!(rows[chg + 1].contains("tax/round.go"), "{f}");
+    // The edit's lines weren't read: it's counted, not listed at "+0".
+    assert!(
+        rows[chg].contains("Changes  1 file touched, no line changes"),
+        "{f}"
+    );
+    assert!(!f.contains("+0"), "{f}");
     // The column starts on the conversation's second row, not at its foot.
     let head = rows
         .iter()
         .position(|r| r.contains("Conversation"))
         .unwrap();
-    assert!(dec <= head + 6, "{f}");
+    assert!(run <= head + 6, "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

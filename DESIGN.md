@@ -4238,11 +4238,11 @@ is made. Everything below is in `rush_ui::frame`.
   stand in its place: no column is squeezed in at its least between the
   text and them. shift+←/→
   move the list's edge, in a Session as in the list; alt+←/→ in the list
-  move it too. The conversation's view stays on alt+s, and the hint under
-  the box says so ("alt+s conversation view", from the key the keymap has
-  for session.preset), and, with the column showing and nothing typed,
-  "⌥←→ the side's width" after it; those are the first of the hint's keys
-  to go when the row is too narrow. In the column's rows a run's or a
+  move it too. The conversation's view stays on alt+s; neither it nor
+  the column's alt+←/→ is said on the hint under the box any more, both
+  being in the help (f1): said on every frame, they took the row from
+  the keys for what's on screen now (see "The session screen at a
+  glance"). In the column's rows a run's or a
   task's name has the row before its facts: whole where it fits, and the
   facts go where they won't fit beside it, rather than both being cut. An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
@@ -4332,6 +4332,48 @@ is made. Everything below is in `rush_ui::frame`.
   its own menu; a right click on one does nothing. The cell is still
   taken as Go's 10×20 (Go asked CSI 16t; the terminal keeps the image's
   shape within its cells either way).
+
+## The session screen at a glance (Rust-only)
+
+One session's screen has to answer three things without being read: is
+it blocked, what is it doing, what should I do. A review of it found the
+current activity said five times, the loudest cells given to account
+quotas and the logo, and about a quarter of its rows chrome. What
+changed, each a departure from Go on purpose
+(`screens_tests/session_core/tests_ux.rs` draws one busy session whole
+and holds each of these; `UX_SHOTS=<folder>` writes its frames to look
+at):
+
+- **A part of the column with nothing in it isn't drawn**
+  (`session_core/side.rs make`). "Decisions  none open", "Running
+  nothing now" and "Changes  none yet" held the column's first rows to
+  say nothing. With no part at all the column draws no rows, and the
+  conversation keeps to the width it has beside a column all the same
+  (`Side::blank`), so nothing moves when a part comes or goes.
+- **Changes never says "+0"** (`side::changes`). A file a command
+  touched, its lines not counted, has no row: such files are summed up
+  ("+4 touched, no line changes" under the files that have lines), and
+  on the head alone when none has lines ("Changes  356 files touched,
+  no line changes"). A file with only deletions says "−7", not "+0 −7".
+- **Another worktree's files aren't the project's changes**
+  (`changes::mine`). A path under `.claude/worktrees/<name>/` or
+  `.worktrees/<name>/` of the project's root, absolute or relative, is
+  another branch's checkout: counted with the session's files outside
+  the project, unless that checkout is where the session works. The
+  column, the Changes tab's count and the status line's lines and files
+  all split by it.
+- **esc says one thing.** The tab row's "esc back to the list" chip
+  shows only while that is what esc does: not with something typed (esc
+  clears it) nor with a turn it can stop (`keys::can_interrupt`), when
+  the hint row says "esc stop the turn" (`views::head`).
+- **Words.** The low note is "7d limit 88%" (`meters::switch_note`; Go's
+  "low: 88% of 7d used" read as an effort level beside the model's).
+  The empty box says "message this agent"; the history's key is in the
+  hint row while the stash is on, and in the help.
+- **The hint row keeps to what's on screen.** "⌥s conversation view"
+  and "⌥←→ the side's width" are in the help (f1) only; with nothing
+  typed the row has room for four of the box's and the screen's own
+  keys (tab the side, ↑ steps) before f1 and esc (`dock::hint`).
 
 ## Conversation views (Rust-only)
 

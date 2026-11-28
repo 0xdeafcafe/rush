@@ -788,7 +788,6 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let foot_r = rush_ui_plugin_ui::hooks::box_note(m, key);
     // With the stash running, the empty box names its history
     // (rushmode.go:3717, sendmode.go:154 historyHint).
-    let history_hint = history_hint(m);
     // Any of the words above that took the label's place took the send
     // mode's with it.
     let send_part = send_part.filter(|_| top.plain() == send_top);
@@ -814,7 +813,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             // The keys off the box (paneDock, rushmode.go:3855).
             "enter or → to talk to this agent".into()
         } else {
-            format!("a message for this agent{history_hint}")
+            // Three words: the history's key is in the help (f1), not in
+            // the box's first row (Rust-only; Go: "a message for this
+            // agent · ctrl+r: stashed, sent, cleared").
+            "message this agent".into()
         },
         lead: line([sp("❯ ", ORANGE)]),
         max_rows: 6,
@@ -1228,20 +1230,16 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     } else {
         vec![("f1", "more"), ("esc", esc)]
     };
+    // The key to the next view is said while one other than Normal
+    // shows. The dropdown's own key (alt+s) and the column's width
+    // (alt+←→) are in the help: said here on every frame, they took the
+    // row from the keys for what's on screen now (Rust-only).
     if other_view {
         back.insert(0, (preset_key.as_str(), next_view));
-    } else if view == "conversation" {
-        // Said last of all but the way back, so it's the first to go when
-        // the row is too narrow.
-        back.insert(back.len() - 1, (preset_key.as_str(), "conversation view"));
     }
-    // With nothing typed, alt+←/→ make the column beside the text
-    // narrower or wider (its edge drags too): said after the view's key,
-    // so it goes first of all when the row is too narrow (Rust-only).
-    if view == "conversation" && !st.typed && !conn(m, key).side.rows.is_empty() {
-        back.insert(back.len() - 1, ("alt+←→", "the side's width"));
-    }
-    few_keys(w, 3, &pairs, &back)
+    // With nothing typed the box's own keys are few, and the ways into
+    // what's on screen (the side, the steps) have the room.
+    few_keys(w, if st.typed { 3 } else { 4 }, &pairs, &back)
 }
 
 /// The conversation's rows on screen as last drawn.
@@ -1317,18 +1315,6 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
         c.q_top = (y + c.q_off).saturating_sub(c.box_off);
         c.q_shown = (0, usize::MAX);
     }
-}
-
-/// What an empty Session box says of the history, while the stash runs
-/// (sendmode.go:154 historyHint): " · ctrl+r history", the word the hint
-/// row and the flashes use (Go: " · ctrl+r: stashed, sent, cleared").
-fn history_hint(m: &Model) -> String {
-    let (_, on) = rush_ui_plugin_ui::hooks::stash(m);
-    if !on {
-        return String::new();
-    }
-    let (_, history) = rush_ui_plugin_ui::hooks::stash_keys(m);
-    format!(" · {history} {}", sendmode::HISTORY_WORD)
 }
 
 /// Whether a decisions card waits on session key, whether you chose to

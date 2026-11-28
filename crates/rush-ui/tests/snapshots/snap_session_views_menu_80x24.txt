@@ -19,6 +19,6 @@
 
 
   ╭─ open in a terminal, so it can't take messages here ──────────────────────╮
-  │ ❯  a message for this agent                                               │
+  │ ❯  message this agent                                                     │
   ╰───────────────────────────────────────────────────────────────────────────╯
     ↑↓ choose  ·  enter show it  ·  esc close

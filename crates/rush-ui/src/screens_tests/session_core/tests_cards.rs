@@ -867,10 +867,7 @@ fn the_finishing_card() {
     m.cards().host = Some(super::cards_host::host());
     let f = screen(&mut m).join("\n");
     assert!(f.contains("PR #118 can't merge yet"), "{f}");
-    assert!(
-        f.contains("a message for this agent"),
-        "the box under it\n{f}"
-    );
+    assert!(f.contains("message this agent"), "the box under it\n{f}");
     press(&mut m, "f");
     assert!(ops(&fake).is_empty(), "f types into the box till ↑");
     super::tests::press(&mut m, "backspace");

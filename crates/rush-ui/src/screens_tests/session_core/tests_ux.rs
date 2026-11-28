@@ -401,3 +401,94 @@ fn the_busy_session_draws() {
         assert!(f.contains("Drive Faster Coordination"), "{f}");
     }
 }
+
+fn file(path: &str, add: i64, del: i64) -> super::changes::FileChange {
+    super::changes::FileChange {
+        path: path.into(),
+        add,
+        del,
+        ..Default::default()
+    }
+}
+
+fn plain(rows: &[rush_core::text::Line]) -> Vec<String> {
+    rows.iter()
+        .map(|l| l.plain().trim_end().to_string())
+        .collect()
+}
+
+/// The column's Changes lists the files with lines counted, most first,
+/// and never a "+0": files a command touched with nothing counted are
+/// summed up, on the head alone when none has lines.
+#[test]
+fn changes_never_say_plus_zero() {
+    use rush_core::text::Line;
+    let touched: Vec<_> = (0..356)
+        .map(|i| file(&format!("/r/gen/{i}"), 0, 0))
+        .collect();
+    let (rows, refs) = super::side::changes(&touched, Line::new(), "/r", 60);
+    assert_eq!(
+        plain(&rows),
+        [" Changes  356 files touched, no line changes"]
+    );
+    assert_eq!(refs, [super::side::CHANGES_REF]);
+
+    let mut some = vec![file("/r/a.rs", 3, 1), file("/r/b.rs", 0, 7)];
+    some.extend(touched.into_iter().take(4));
+    let (rows, refs) = super::side::changes(&some, Line::new(), "/r", 60);
+    let got = plain(&rows);
+    assert_eq!(got.len(), 4, "{got:?}");
+    assert!(got[0].starts_with(" Changes   · 6 files"), "{got:?}");
+    assert!(got[1].contains("b.rs") && got[1].ends_with("−7"), "{got:?}");
+    assert!(
+        got[2].contains("a.rs") && got[2].ends_with("+3 −1"),
+        "{got:?}"
+    );
+    assert_eq!(got[3], "   +4 touched, no line changes");
+    assert_eq!(refs.len(), rows.len());
+    assert!(!got.join("\n").contains("+0"), "{got:?}");
+
+    let (rows, _) = super::side::changes(&[], Line::new(), "/r", 60);
+    assert!(rows.is_empty(), "nothing changed, no part");
+}
+
+/// A file in another branch's checkout kept inside the project isn't the
+/// session's change to the project, unless that checkout is where the
+/// session works.
+#[test]
+fn another_worktrees_files_arent_the_projects() {
+    use super::changes::mine;
+    for (root, dir, path, want) in [
+        ("/r", "/r", "/r/src/a.rs", true),
+        ("/r", "/r", "src/a.rs", true),
+        ("/r", "/r", "/elsewhere/a.rs", false),
+        ("/r", "/r", "/r/.claude/worktrees/integ-b46/2024", false),
+        ("/r", "/r", ".claude/worktrees/integ-b46/2024", false),
+        ("/r", "/r", "./.worktrees/merge-0930/a.rs", false),
+        ("/r", "/r/sub", "/r/.worktrees/merge-0930/a.rs", false),
+        // The session's own worktree, reached from the main checkout's root.
+        (
+            "/r",
+            "/r/.claude/worktrees/mine",
+            "/r/.claude/worktrees/mine/a.rs",
+            true,
+        ),
+        (
+            "/r",
+            "/r/.claude/worktrees/mine/sub",
+            ".claude/worktrees/mine/a.rs",
+            true,
+        ),
+        (
+            "/r",
+            "/r/.claude/worktrees/mine",
+            "/r/.claude/worktrees/min/a.rs",
+            false,
+        ),
+        // The folder that holds them, itself.
+        ("/r", "/r", "/r/.claude/worktrees", true),
+        ("/r", "/r", "/r/.claude/settings.json", true),
+    ] {
+        assert_eq!(mine(root, dir, path), want, "{root} {dir} {path}");
+    }
+}
