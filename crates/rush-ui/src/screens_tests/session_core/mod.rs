@@ -37,4 +37,5 @@ mod tests_tasks;
 mod tests_turnwants_inline;
 mod tests_undo;
 mod tests_unreached;
+mod tests_ux;
 mod tests_viewsuggest;
