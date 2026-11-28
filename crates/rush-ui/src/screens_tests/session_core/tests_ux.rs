@@ -589,12 +589,19 @@ fn a_turns_header_says_what_it_came_to() {
             .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
     };
     let first = head("2 steps · 22m 01s · $1.10");
-    assert!(first.contains("▍ Agent  12:54"), "{first}");
-    let woke = head("Agent  13:24 · woke itself");
+    // Times are drawn in the local zone, so only the minutes are pinned.
+    assert!(
+        first.contains("▍ Agent  ") && first.contains(":54 "),
+        "{first}"
+    );
+    let woke = head(":24 · woke itself");
     assert!(woke.contains("5 steps · 1m 01s · $0.79"), "{woke}");
     assert!(!f.contains("woke up without a message"), "{f}");
     // The turn under way has no totals yet: the live line has its time.
-    let live = head("Agent  13:34");
+    let live = *rows
+        .iter()
+        .find(|r| r.contains("Agent  ") && r.contains(":34"))
+        .unwrap_or_else(|| panic!("no turn at :34 in\n{f}"));
     assert!(!live.contains("step"), "{live}");
     // One right edge: the totals end where a step's time does.
     let edge = |row: &str, what: &str| {
