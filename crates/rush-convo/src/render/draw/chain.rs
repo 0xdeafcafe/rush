@@ -9,6 +9,11 @@ use super::*;
 use crate::model::PartMark;
 use crate::render::shell::Segment;
 
+/// How many digits n has.
+fn digits(n: usize) -> usize {
+    n.to_string().len()
+}
+
 /// A command of a chain in a few words, for its row of the list: the
 /// command its pipeline starts with, the filters after it left out, and a
 /// heredoc fed to it as how many lines it has: python3 (59-line script).
@@ -103,16 +108,22 @@ impl Drawer<'_> {
             && !self.s.part_marks(id, n, self.o.now, paused).is_empty()
     }
 
-    /// A running chain, under its step's row: a row for each of its
-    /// commands and how it stands (✓ and how long it took, the spinner,
-    /// how long it has run and the process busy under it, ✗ where it
-    /// failed, ○ not started), the last two lines printed under the one
-    /// running, then one row of keys. A heredoc's lines and a pipeline's
-    /// filters are folded into the command's name. Enter opens the call as
-    /// written (shell_body), which is how a finished one is drawn. Whether
-    /// it drew. Not Go's, which drew the command's whole text with a time
-    /// beside each line, then the keys, what runs now and the output as
-    /// three blocks under it.
+    /// A running chain, under its step's row: about five rows round the
+    /// command running now. Those done before it a row each, the two
+    /// latest (✓ and how long it took; one that failed always has its
+    /// row, ✗), the earlier ones counted on a row of their own; the one
+    /// running, with the spinner, how long it has run and the process
+    /// busy under it, and the last two lines it printed; then those not
+    /// started, named on one row with how many more there are
+    /// (· update-buck --check  · git merge origin/master  +4). A chain of
+    /// fourteen commands drawn a row each took the conversation's page
+    /// to say where it was. Picked, a row of its keys closes it. A
+    /// heredoc's lines and a pipeline's filters are folded into the
+    /// command's name. Enter opens the call as written (shell_body),
+    /// which is how a finished one is drawn. Whether it drew. Not Go's,
+    /// which drew the command's whole text with a time beside each line,
+    /// then the keys, what runs now and the output as three blocks under
+    /// it.
     pub(crate) fn chain_list(&mut self, id: StepId, r: &str, indent: usize) -> bool {
         if !self.chain_listed(id) {
             return false;
@@ -146,12 +157,41 @@ impl Drawer<'_> {
         let running = |m: &PartMark| matches!(m, PartMark::Running { .. } | PartMark::Paused);
         let last_running = marks.iter().rposition(running);
         let pad = self.sp(indent - 1);
+        // Where the chain is: the command running, else the last one
+        // seen. Before it, the two latest rows and any that failed; after
+        // it, one row for all that hasn't started.
+        let at = last_running
+            .or_else(|| marks.iter().rposition(|m| !matches!(m, PartMark::Unknown)))
+            .unwrap_or(0);
+        let runs = |k: usize| super::super::shell::run_text(&segs[k].text).is_some();
+        let failed = |k: usize| matches!(marks.get(k), Some(PartMark::Ran { failed: true, .. }));
+        let before: Vec<usize> = (0..at.min(segs.len())).filter(|&k| runs(k)).collect();
+        const BEFORE: usize = 2;
+        let folded: Vec<usize> = before
+            .iter()
+            .rev()
+            .skip(BEFORE)
+            .copied()
+            .filter(|&k| !failed(k))
+            .collect();
+        if !folded.is_empty() {
+            let l = pad
+                .clone()
+                .and(paint(C_GREEN, "✓ "))
+                .and(dim(&format!("{} before", plural(folded.len(), "command"))));
+            self.add(r, Color::Default, l, Txt::new());
+        }
+        let mut later: Vec<String> = Vec::new();
         for (k, sg) in segs.iter().enumerate() {
             // A comment, a loop's head: it runs nothing.
-            if super::super::shell::run_text(&sg.text).is_none() {
+            if !runs(k) || folded.contains(&k) {
                 continue;
             }
             let m = marks.get(k).copied().unwrap_or(PartMark::Unknown);
+            if k > at && matches!(m, PartMark::Unknown) {
+                later.push(part_name(sg));
+                continue;
+            }
             let round = |runs: usize| {
                 if runs > 1 {
                     format!(" · run {runs}")
@@ -225,14 +265,43 @@ impl Drawer<'_> {
                 }
             }
         }
-        // One row of keys; ▸ says the row can open (enter). k and p are in
-        // the hints at the foot of the screen.
-        let picked = o.selected == r;
-        let mut l = pad.and(faint("▸ "));
-        if !picked {
-            l.push(key_hint("↑", "pick this step, then"));
-            l.push_str("  ", Style::default());
+        // What hasn't started, on one row: as many names as fit, then how
+        // many more.
+        if !later.is_empty() {
+            let room = self.cw.saturating_sub(indent + 8).max(16);
+            let mut l = pad.clone();
+            let mut shown = 0;
+            for name in &later {
+                let name = truncate_cells(name, 28);
+                let more = later.len() - shown - 1;
+                // Room kept for the count of those left out.
+                let tail = if more > 0 { 2 + 1 + digits(more) } else { 0 };
+                let sep = if shown > 0 { 3 } else { 0 };
+                if shown > 0 && l.width() + sep + 2 + width(&name) + tail > room + indent {
+                    break;
+                }
+                if shown > 0 {
+                    l.push_str("   ", Style::default());
+                }
+                l.push(faint("○ "));
+                l.push(dim(&name));
+                shown += 1;
+            }
+            if shown < later.len() {
+                l.push(faint(&format!("  +{}", later.len() - shown)));
+            }
+            self.add(r, Color::Default, l, Txt::new());
         }
+        // Picked, one row of keys; ▸ says the row can open (enter). k and
+        // p are in the hints at the foot of the screen. Not picked, no
+        // row: "↑ pick this step, then…" under every running chain said
+        // how to use a list on each of them, and the foot of the screen
+        // has ↑ steps.
+        let picked = o.selected == r;
+        if !picked {
+            return true;
+        }
+        let mut l = pad.and(faint("▸ "));
         l.push(key_hint("enter", "opens it"));
         l.push(faint(" · "));
         l.push(key_hint("x", "stops the chain"));
@@ -280,11 +349,12 @@ impl Drawer<'_> {
         }
     }
 
-    /// Under a running chain, the keys that act on it: k skips the command
-    /// running now (the chain goes on as after a failure), x stops the
-    /// whole chain, p pauses the command or lets it go on. Not picked, it
-    /// says how to pick it first. Nothing while rush hasn't seen which
-    /// command runs.
+    /// Under a running chain, picked, the keys that act on it: k skips the
+    /// command running now (the chain goes on as after a failure), x stops
+    /// the whole chain, p pauses the command or lets it go on. Not picked,
+    /// nothing: the keys do nothing then, and the row said how to pick it
+    /// first under every running chain (Rust-only; Go drew it always).
+    /// Nothing while rush hasn't seen which command runs.
     pub(crate) fn chain_keys(&mut self, id: StepId, indent: usize) {
         let st = self.s.step(id);
         if st.id.is_empty() {
@@ -307,12 +377,10 @@ impl Drawer<'_> {
         } else {
             "pause it"
         };
-        let picked = self.o.selected == self.step_ref(st);
-        let mut l = self.sp(indent - 1);
-        if !picked {
-            l.push(key_hint("↑", "pick this step, then"));
-            l.push_str("  ", Style::default());
+        if self.o.selected != self.step_ref(st) {
+            return;
         }
+        let mut l = self.sp(indent - 1);
         l.push(key_hint("k", &format!("skip {word}")));
         l.push(faint(" · "));
         l.push(key_hint("x", "stop the whole chain"));

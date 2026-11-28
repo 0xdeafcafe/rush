@@ -1002,7 +1002,7 @@ fn the_docked_live_line_has_room_either_side() {
         .collect();
     let i = rows
         .iter()
-        .position(|l| l.contains("running Bash…"))
+        .position(|l| l.contains("go test ./... · 4.0s  turn 5s"))
         .expect(&out);
     assert!(
         i + 2 == rows.len(),
@@ -1013,7 +1013,8 @@ fn the_docked_live_line_has_room_either_side() {
 }
 
 // The pane's live line is docked (activity_test.go): a running step is
-// named on it with the turn's time and is never called stalled; a step
+// named on it, a command in its own words (not Go's "running Bash…"),
+// with the turn's time and is never called stalled; a step
 // waiting for leave says so; a retried request says why. Undocked, the
 // running step's own row spins and there's no line.
 #[test]
@@ -1031,11 +1032,11 @@ fn the_docked_live_line_names_the_step() {
         ..Options::default()
     };
     let out = plain(&Renderer::new().render(&s, &o));
-    assert!(!out.contains("running Bash"), "undocked:\n{out}");
+    assert!(!out.contains("turn 10m 00s"), "undocked:\n{out}");
     o.dock_activity = true;
     let out = plain(&Renderer::new().render(&s, &o));
     assert!(
-        out.contains("running Bash…  9m 59s  turn 10m 00s"),
+        out.contains("go test ./... · 9m 59s  turn 10m 00s") && !out.contains("running Bash"),
         "docked:\n{out}"
     );
     assert!(!out.contains("stalled"), "{out}");
@@ -1124,7 +1125,9 @@ fn the_live_line_says_the_state_plainly() {
 
 // A turn that has produced nothing while a command an earlier turn
 // started still runs is waiting on it, and says how long your message has
-// waited; once the turn is at work the command is named after its facts.
+// waited; until then, and once the turn is at work, what runs beside it
+// is counted after its facts ("1 shell"), the column or the rows under
+// the conversation naming each.
 #[test]
 fn the_live_line_names_what_still_runs_from_before() {
     use rush_core::event::{Event, TaskKind, TaskStarted};
@@ -1163,10 +1166,7 @@ fn the_live_line_names_what_still_runs_from_before() {
         .lines()
         .find(|l| l.contains("starting…"))
         .unwrap_or_else(|| panic!("no starting row:\n{out}"));
-    assert!(
-        row.contains("cargo h2 sim bounces still running 1m 44s"),
-        "{row}"
-    );
+    assert!(row.trim_end().ends_with("5s  1 shell"), "{row}");
     // Still nothing after a while: the turn waits on it.
     let out = text(&Renderer::new().render(&s, &opts(120, at(400))));
     let row = out
@@ -1178,7 +1178,7 @@ fn the_live_line_names_what_still_runs_from_before() {
         "{row}"
     );
     assert!(row.contains("your message has waited 5m 00s"), "{row}");
-    assert!(!row.contains("still running"), "said once: {row}");
+    assert!(!row.contains("1 shell"), "said once: {row}");
     assert!(!out.contains("starting…"), "{out}");
     assert!(
         !out.contains("stalled"),
@@ -1192,10 +1192,7 @@ fn the_live_line_names_what_still_runs_from_before() {
         .lines()
         .find(|l| l.contains("working…"))
         .unwrap_or_else(|| panic!("no working row:\n{out}"));
-    assert!(
-        row.contains("cargo h2 sim bounces still running 6m 59s"),
-        "{row}"
-    );
+    assert!(row.trim_end().ends_with("  1 shell"), "{row}");
     assert!(!out.contains("waiting on"), "{out}");
 
     // Nothing running from before: a quiet turn is starting.
@@ -1207,7 +1204,7 @@ fn the_live_line_names_what_still_runs_from_before() {
     let out = text(&Renderer::new().render(&s, &opts(120, at(20))));
     assert!(out.contains("starting…"), "{out}");
     assert!(
-        !out.contains("waiting on") && !out.contains("still running"),
+        !out.contains("waiting on") && !out.contains("shell"),
         "{out}"
     );
 }

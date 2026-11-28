@@ -1,7 +1,7 @@
 //! A running chain in the conversation: which of its commands runs now
 //! (n/m on the step's row), how long each ran or runs (beside each
-//! command), and the keys that skip the one running now or stop the whole
-//! chain, in every view that shows the step. After Go's
+//! command), and, on the step picked, the keys that skip the one running
+//! now or stop the whole chain, in every view that shows the step. After Go's
 //! internal/convo/chainrun_test.go (TestWatchShellsTimesEachPart).
 //! UPDATE_SNAPSHOTS=1 writes the snapshot again.
 
@@ -73,7 +73,7 @@ fn snapshot(name: &str, got: &str) {
 
 /// Normal: under the step's row a row for each command of the chain (the
 /// build ✓ and its 4s, the tests' spinner and 15s, clippy ○ not started),
-/// then one row of keys; picked, the keys alone.
+/// and no row of keys until it's picked: the keys do nothing before.
 #[test]
 fn normal_lists_the_steps_their_times_and_the_keys() {
     let s = running();
@@ -101,7 +101,7 @@ fn normal_lists_the_steps_their_times_and_the_keys() {
         "not the command as written: {got}"
     );
     assert!(
-        got.contains("▸ ↑ pick this step, then  enter opens it · x stops the chain"),
+        !got.contains("pick this step") && !got.contains("x stops the chain"),
         "{got}"
     );
     let picked = draw(&s, Preset::Normal, "t1:s:b1");
@@ -132,10 +132,13 @@ fn opened_it_is_the_command_as_written() {
     assert!(build.contains("✓ 4"), "the build took 4s: {build}");
     assert!(got.contains("▸ cargo test --workspace"), "{got}");
     assert!(got.contains("2/3 cargo test"), "{got}");
+    // The keys' row is the picked step's: enter opened it from there.
+    assert!(!got.contains("k skip cargo test"), "{got}");
+    o.selected = "t1:s:b1".into();
+    let got = plain(&Renderer::new().render(&s, &o));
     assert!(
-        got.contains(
-            "↑ pick this step, then  k skip cargo test · x stop the whole chain · p pause it"
-        ),
+        got.contains("k skip cargo test · x stop the whole chain · p pause it")
+            && !got.contains("pick this step"),
         "{got}"
     );
     assert!(!got.contains("enter opens it"), "{got}");
@@ -198,13 +201,15 @@ fn the_list_folds_a_heredoc_and_a_pipeline_and_shows_the_last_output() {
 }
 
 /// Code's check line and Chat's bubble foot say which command runs; Code
-/// shows the keys.
+/// shows the keys on the step picked.
 #[test]
 fn other_views_say_it_too() {
     let s = running();
     let code = draw(&s, Preset::Code, "");
     let row = code.lines().find(|l| l.contains("running")).expect(&code);
     assert!(row.contains("2/3 cargo test"), "{code}");
+    assert!(!code.contains("k skip cargo test"), "{code}");
+    let code = draw(&s, Preset::Code, "t1:s:b1");
     assert!(code.contains("k skip cargo test"), "{code}");
     let chat = draw(&s, Preset::Chat, "");
     assert!(chat.contains("✱ running 2/3 cargo test"), "{chat}");
@@ -248,8 +253,8 @@ fn proc_(pid: i32, args: &str, start: i64, kids: Vec<ShellProc>) -> ShellProc {
 }
 
 /// A running chain that isn't the turn's newest step (the agent ran a
-/// Read beside it) still shows its commands, each one's time and the
-/// keys, without being opened by hand.
+/// Read beside it) still shows its commands and each one's time, without
+/// being opened by hand; picked, its keys.
 #[test]
 fn a_chain_beside_another_call_stays_open() {
     let mut s = running();
@@ -263,6 +268,7 @@ fn a_chain_beside_another_call_stays_open() {
         .find(|l| l.contains("✓ cargo build"))
         .unwrap_or_else(|| panic!("the chain's commands are shown:\n{got}"));
     assert!(build.contains("4.0s"), "{build}");
+    let got = draw(&s, Preset::Normal, "t1:s:b1");
     assert!(got.contains("x stops the chain"), "{got}");
 }
 
@@ -294,7 +300,10 @@ fn a_quoted_chain_in_claude_codes_wrapper() {
         .find(|l| l.starts_with("t1:s:b1") && l.contains("cargo test --workspace"))
         .unwrap_or_else(|| panic!("{got}"));
     assert!(row.contains("18s"), "{row}");
-    assert!(got.contains("x stops the chain"), "{got}");
+    assert!(
+        draw(&s, Preset::Normal, "t1:s:b1").contains("x stops the chain"),
+        "{got}"
+    );
     // Opened, its row says where it is.
     let mut o = Options {
         width: 100,
@@ -309,6 +318,8 @@ fn a_quoted_chain_in_claude_codes_wrapper() {
             .any(|l| l.starts_with("t1:s:b1") && l.contains("2/2 cargo test")),
         "{got}"
     );
+    o.selected = "t1:s:b1".into();
+    let got = plain(&Renderer::new().render(&s, &o));
     assert!(got.contains("k skip cargo test"), "{got}");
 }
 
@@ -341,7 +352,7 @@ fn a_loops_command_is_marked() {
 }
 
 /// A script file: the commands seen run under it, each with its time,
-/// the one running now marked, and the keys for it.
+/// the one running now marked, and, picked, the keys for it.
 #[test]
 fn a_script_files_commands_are_shown() {
     let cmd = "bash scripts/check.sh";
@@ -375,7 +386,10 @@ fn a_script_files_commands_are_shown() {
         .find(|l| l.contains("▸ cargo test"))
         .unwrap_or_else(|| panic!("{got}"));
     assert!(test.contains("15"), "the tests run 15s now: {test}");
-    assert!(got.contains("k skip cargo test"), "{got}");
+    assert!(
+        draw(&s, Preset::Normal, "t1:s:b1").contains("k skip cargo test"),
+        "{got}"
+    );
 }
 
 const PIPE: &str =

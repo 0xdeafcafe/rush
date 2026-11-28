@@ -1651,22 +1651,25 @@ impl<'a> Drawer<'a> {
         // A background task's notice links back to the call that started
         // the task: enter or a click on it goes to that step (Rust-only).
         let linked = !t.woke_call.is_empty() && self.s.made_call(&t.woke_call);
-        let right = if linked && wake {
-            faint("↑ its step")
-        } else {
-            Txt::new()
-        };
-        if linked
-            && !wake
-            && let Some(last) = rows.last_mut()
-        {
-            last.push(faint("  ↑ its step"));
-        }
         let r = if linked {
             woke_ref(&self.r)
         } else {
             self.r.clone()
         };
+        // Said only on the row picked, where enter goes there: on every
+        // notice it was a key's hint for a row the keys weren't on.
+        let hinted = linked && self.o.selected == r;
+        let right = if hinted && wake {
+            faint("enter · its step")
+        } else {
+            Txt::new()
+        };
+        if hinted
+            && !wake
+            && let Some(last) = rows.last_mut()
+        {
+            last.push(faint("  enter · its step"));
+        }
         for (i, row) in rows.into_iter().enumerate() {
             if i == 0 {
                 let l = self
@@ -1720,8 +1723,15 @@ impl<'a> Drawer<'a> {
     /// reading the results (a step came back), working. A turn that has
     /// produced nothing while a step of an earlier turn still runs is
     /// waiting on that step, and says how long your message has waited;
-    /// a command or job running beside a turn at work is named after the
-    /// turn's facts. Rust-only.
+    /// what runs beside a turn at work is counted after the turn's facts.
+    ///
+    /// Docked under the conversation it is the one place that says what
+    /// runs now, in the command's own words: "✶ cargo clippy · 2 of 9 ·
+    /// 16s   turn 27s · 2 shells · 1 subagent · ↓ 312 tokens". It was
+    /// "running Bash… 16s", the tool's name where the command's was
+    /// wanted, and what ran beside was one command's name and "and 1
+    /// more"; the step's row, the column and the header each said the
+    /// rest. Rust-only.
     fn live_line(&mut self) {
         let t = self.t;
         if let Some(c) = self.s.compacting() {
@@ -1738,6 +1748,8 @@ impl<'a> Drawer<'a> {
             false,
         );
         let mut tool_active = false;
+        // A command at work, in its own words, and where its chain is.
+        let mut command: Option<(String, String)> = None;
         if let Some(last) = t.items.last() {
             let n = t.items.len() - 1;
             match last {
@@ -1768,6 +1780,9 @@ impl<'a> Drawer<'a> {
                         } else {
                             self.running_words(st)
                         };
+                        if st.status == Status::Running {
+                            command = self.command_now(*id);
+                        }
                         since = st.start;
                     } else if st.end != 0 {
                         verb = "reading the results".into();
@@ -1818,7 +1833,20 @@ impl<'a> Drawer<'a> {
                 if t.start != 0 && since != t.start {
                     facts.push(format!("turn {}", self.since(t.start)));
                 }
-                live_head_txt(self.o.tick, &verb, took.as_deref())
+                match &command {
+                    Some((words, place)) => {
+                        let mut head =
+                            paint(C_ORANGE.bold(), &format!("{} {words}", spin(self.o.tick)));
+                        for more in [Some(place.as_str()), took.as_deref()] {
+                            if let Some(m) = more.filter(|m| !m.is_empty()) {
+                                head.push(faint(" · "));
+                                head.push(paint(C_ORANGE, m));
+                            }
+                        }
+                        head
+                    }
+                    None => live_head_txt(self.o.tick, &verb, took.as_deref()),
+                }
             }
         };
         if t.streamed > 0 {
@@ -1908,10 +1936,35 @@ impl<'a> Drawer<'a> {
         (!what.is_empty()).then(|| (what, j.start, j.id.clone(), j.background))
     }
 
-    /// The command or job of this session that runs beside the turn, the
-    /// one running longest, and how many more do: "cargo test still
-    /// running 2m 25s". Not one whose call still runs in this turn (its
-    /// row says so) nor held, the call or task the turn waits on.
+    /// The command step id runs now, as the live line names it: its
+    /// first words and, in a chain, where it is ("cargo clippy", "2 of
+    /// 9"); a script's command seen running; else the call's own first
+    /// words. None for a call that isn't a command, or one rush runs
+    /// (rush agent start: running_words has its words).
+    fn command_now(&self, id: StepId) -> Option<(String, String)> {
+        let st = self.s.step(id);
+        if st.kind != Kind::Shell || crate::model::runs::rush_words(self.s, st, true).is_some() {
+            return None;
+        }
+        if let Some((place, words)) = self.s.running_now(id)
+            && !words.is_empty()
+        {
+            let place = match place.split_once('/') {
+                Some((at, of)) => format!("{at} of {of}"),
+                None => String::new(),
+            };
+            return Some((truncate_cells(&words, 40), place));
+        }
+        let words = command_words(&st.call().input.command, 40);
+        (!words.is_empty()).then(|| (words, String::new()))
+    }
+
+    /// What of this session runs beside the turn, counted by what it is:
+    /// "2 shells · 1 subagent". Not one whose call still runs in this
+    /// turn (its row says so) nor held, the call or task the turn waits
+    /// on. It named the one running longest and counted the rest ("cargo
+    /// test still running 2m 25s and 1 more"); the column beside the
+    /// conversation, or the rows under it, name each (Rust-only).
     fn beside(&mut self, held: &str) -> Option<String> {
         let (s, t) = (self.s, self.t);
         let mut jobs: Vec<&crate::model::Job> = s
@@ -1925,21 +1978,14 @@ impl<'a> Drawer<'a> {
             })
             .collect();
         jobs.sort_by_key(|j| j.start);
-        let j = jobs.first()?;
-        let cmd = s.job_command(j);
-        let name = command_words(if cmd.is_empty() { &j.label } else { &cmd }, 28);
-        if name.is_empty() {
-            return None;
+        let mut out: Vec<String> = Vec::new();
+        for kind in ["workflow", "subagent", "shell", "monitor", "task"] {
+            let n = jobs.iter().filter(|j| j.kind() == kind).count();
+            if n > 0 {
+                out.push(plural(n, kind));
+            }
         }
-        let mut out = format!("{name} still running");
-        if j.start != 0 {
-            out.push(' ');
-            out.push_str(&self.since(j.start));
-        }
-        if jobs.len() > 1 {
-            out.push_str(&format!(" and {} more", jobs.len() - 1));
-        }
-        Some(out)
+        (!out.is_empty()).then(|| out.join(" · "))
     }
 
     /// A turn the conversation holds open that its host or row says is

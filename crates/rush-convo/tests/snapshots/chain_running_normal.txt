@@ -7,4 +7,3 @@ t1:s:b1       |│   ✳ cargo build, cargo test, cargo clippy                  
 t1:s:b1       |│       ✓ cargo build                                                                         4.0s
 t1:s:b1       |│       · cargo test --workspace                                                               15s
 t1:s:b1       |│       ○ cargo clippy
-t1:s:b1       |│       ▸ ↑ pick this step, then  enter opens it · x stops the chain
