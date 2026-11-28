@@ -17,7 +17,9 @@ pub(crate) const PLAIN: Style = Style::PLAIN;
 pub(crate) const C_TEXT: Style = fg(226, 221, 211);
 pub(crate) const C_SUB: Style = fg(168, 162, 152);
 pub(crate) const C_DIM: Style = fg(138, 132, 122);
-pub(crate) const C_FAINT: Style = fg(94, 89, 82);
+/// Not Go's (94, 89, 82), which was under 3:1 on the ground: a tier up,
+/// still under what tools print (C_OUT).
+pub(crate) const C_FAINT: Style = fg(108, 102, 94);
 pub(crate) const C_WHITE: Style = fg(240, 236, 228);
 /// What tools print: under faint text, over faint rules.
 pub(crate) const C_OUT: Style = fg(119, 113, 106);

@@ -41,7 +41,7 @@ pub const DARK: Palette = Palette {
     panel_bg: Color::Rgb(30, 28, 26),
     user_bg: Color::Rgb(0x1a, 0x18, 0x16),
     convo_dim: Color::Rgb(138, 132, 122),
-    convo_faint: Color::Rgb(94, 89, 82),
+    convo_faint: Color::Rgb(108, 102, 94),
 };
 
 /// Colourblind mode swaps green and red for these.

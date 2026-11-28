@@ -630,12 +630,30 @@ impl<'a> Drawer<'a> {
         if !m.is_empty() {
             parts.push(m);
         }
-        parts.join("   ")
+        parts.join(" · ")
+    }
+
+    /// A turn the agent began with nothing said to it, no task's notice
+    /// and no word from rush: it "woke up without a message". Open, such
+    /// a turn has no row for that: the row that names the agent says
+    /// "woke itself" after its time (speaker).
+    fn woke_itself(&self) -> bool {
+        let t = self.t;
+        t.n != 1
+            && t.from.is_empty()
+            && t.cause.is_empty()
+            && t.prompt.trim().is_empty()
+            && t.images.is_empty()
+            && !t.command.contains('\n')
+            && !t.items.is_empty()
+            && rush_ask(t).is_empty()
     }
 
     /// The start of a turn, open or folded: a gap, then what you said in its
-    /// box, or the line for what woke it (render.go:686).
-    fn head(&mut self) {
+    /// box, or the line for what woke it (render.go:686). named: the
+    /// agent's row follows (speaker), which says a turn woke itself, so
+    /// that isn't a row of its own here.
+    fn head(&mut self, named: bool) {
         let t = self.t;
         self.opening();
         self.hooks();
@@ -669,6 +687,10 @@ impl<'a> Drawer<'a> {
             let r = self.r.clone();
             let pics = sent_images(&t.pictures, &t.images);
             self.user_box(&r, ask, &imgs, &pics, multi);
+        } else if named && self.woke_itself() {
+            // "◌ woke up without a message" was a row, a gap and then the
+            // agent's row: three rows to say one fact (Rust-only).
+            self.lines.pop();
         } else {
             self.other_ask(&ask, noun, how, wake);
             self.baton_under();
@@ -714,34 +736,56 @@ impl<'a> Drawer<'a> {
         }
     }
 
-    /// Names the agent answering under what you said, and when it began.
+    /// Names the agent answering under what you said, and when it began;
+    /// once the turn is over, what it came to on the same row's right:
+    /// "Claude  13:18 · woke itself        12 steps · 2m 05s · $1.10".
+    ///
+    /// Not Go's row, on purpose (Rust-only): its name is bold in the
+    /// text's colour, orange being for what runs now; the session's own
+    /// @handle isn't said after the time on every turn (Options::agent:
+    /// the header has it, once, and here it was the first thing cut,
+    /// "@drive-faster-coordinat…"); a turn nothing was said to says so
+    /// here, not on a row of its own above; and the turn's totals are
+    /// here, where the eye finds a turn, not on a row after its last
+    /// words, on the right edge the steps' times keep.
     fn speaker(&mut self) {
         if self.t.items.is_empty() {
             return;
         }
         self.bare();
+        let t = self.t;
         let who = if self.o.speaker.is_empty() {
             "Agent"
         } else {
             &self.o.speaker
         };
-        let mut l = self.spine().and_raw(" ").and(paint(C_ORANGE.bold(), who));
-        if self.t.start != 0 {
+        let mut l = self.spine().and_raw(" ").and(paint(C_TEXT.bold(), who));
+        if t.start != 0 {
             l.push(dim(&format!(
                 "  {}",
-                clock(self.t.start, self.o.offset(self.t.start))
+                clock(t.start, self.o.offset(t.start))
             )));
         }
-        if !self.o.agent.is_empty() {
+        let woke = self.woke_itself();
+        if woke {
             l.push(faint(" · "));
-            l.push(paint(C_SUB, &self.o.agent));
+            l.push(dim("woke itself"));
         }
-        self.add("", Color::Default, l, Txt::new());
+        let m = self.meta();
+        let right = if !m.is_empty() && !t.live && self.steps_counted() > 0 {
+            dim(&m).and_raw("  ")
+        } else {
+            Txt::new()
+        };
+        // A turn that woke itself has no row above this one: this is the
+        // row that picks it.
+        let r = if woke { self.r.clone() } else { String::new() };
+        self.add(&r, Color::Default, l, right);
     }
 
     /// An open turn: everything in it (render.go:735).
     pub fn open(&mut self) {
-        self.head();
+        self.head(true);
         self.speaker();
         let t = self.t;
         let items = &t.items;
@@ -793,16 +837,11 @@ impl<'a> Drawer<'a> {
                 break;
             }
         }
-        let m = self.meta();
-        if !m.is_empty() && !t.live && self.steps_counted() > 0 {
-            let sp = self.spine();
-            self.add("", Color::Default, sp, dim(&m).and_raw("  "));
-        }
     }
 
     /// A turn gone past, as its story (history_settled.go:17).
     pub fn settled(&mut self) {
-        self.head();
+        self.head(true);
         self.speaker();
         self.story();
         if self.t.stopped {
@@ -814,21 +853,16 @@ impl<'a> Drawer<'a> {
                 .and(paint(C_RED, &format!("✗ {}", self.t.err)));
             self.add("", Color::Default, l, Txt::new());
         }
-        let m = self.meta();
-        if !m.is_empty() && self.steps_counted() > 0 {
-            let sp = self.spine();
-            self.add("", Color::Default, sp, dim(&m).and_raw("  "));
-        }
     }
 
     /// A turn folded by hand: what you said, and one dim line.
     pub fn folded(&mut self) {
-        self.head();
+        self.head(false);
         let r = self.r.clone();
         if let Some(l) = self.lines.last_mut() {
             l.r#ref = r.clone();
         }
-        let mut meta = self.meta().replace("   ", " · ");
+        let mut meta = self.meta();
         if !meta.is_empty() {
             meta.push_str(" · ");
         }
@@ -900,9 +934,16 @@ impl<'a> Drawer<'a> {
         }
     }
 
-    /// Whether a finished turn's step folds into its batch.
+    /// Whether a finished turn's step folds into its batch. One that
+    /// failed doesn't: it keeps a row of its own, red-edged, with the
+    /// line that says what went wrong (step), where folded among "read 3
+    /// files, cargo clippy · 5 steps · 1 failed" it had the weight of a
+    /// cat (Rust-only).
     fn batched(&self, id: StepId) -> bool {
         let st = self.s.step(id);
+        if st.status == Status::Failed {
+            return false;
+        }
         if matches!(glyph_for(st), "⇉" | "◆" | "◇")
             || self.o.ran.contains_key(&*st.id)
             || crate::model::runs::rush_tool(&st.tool).is_some()
@@ -1238,7 +1279,9 @@ impl<'a> Drawer<'a> {
                 }
             }
             Item::Compact { compact, summary } => {
-                let label = paint(C_BLUE, "◇ context compacted");
+                // Dim: it's a note on the conversation's past, and bright
+                // blue across the page read as something to act on.
+                let label = dim("◇ context compacted");
                 let mut facts = Vec::new();
                 if !compact.trigger.is_empty() {
                     facts.push(compact.trigger.to_string());
@@ -2342,6 +2385,18 @@ impl<'a> Drawer<'a> {
             self.helper -= 1;
         }
         self.tool -= 1;
+        // A step that failed has a red edge down its rows, so it's found
+        // without reading: its row, its error line, what's open under it.
+        if st.status == Status::Failed && depth == 0 && !helper {
+            for l in &mut self.lines[from..] {
+                if let Some(sp) = l.line.spans.first_mut()
+                    && sp.text == "│"
+                {
+                    sp.text = "▍".into();
+                    sp.style = C_RED;
+                }
+            }
+        }
         self.own(&r, from);
     }
 
@@ -5249,6 +5304,14 @@ fn unasked(t: &Turn) -> &str {
     } else {
         "woke up without a message"
     }
+}
+
+/// Whether turn t began with words of yours: not a task's notice, a
+/// message from another agent, or one rush sent for you (a nudge to hand
+/// over, "moved to an account with room"). What the prompts pinned over
+/// a scrolled conversation are chosen by.
+pub fn yours(t: &Turn) -> bool {
+    t.from.is_empty() && !t.prompt.trim().is_empty() && !woke(t).2 && rush_ask(t).is_empty()
 }
 
 /// What a turn rush started says in place of its words to the agent.

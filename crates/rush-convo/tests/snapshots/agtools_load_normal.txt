@@ -2,11 +2,10 @@
 ▍ You  00:00
 ▍ ask astra
 
-▍ Agent  00:00
+▍ Agent  00:00                                                                2 steps · 6s · $0.01
 │   ✓ ↩ Codex answered  Done.                                                                 1.0s
 │       ▏Codex (c1) finished:
 │       ▏
 │       ▏Done.
 ▍
 ▍ astra is done.
-▍                                                                             2 steps   6s   $0.01

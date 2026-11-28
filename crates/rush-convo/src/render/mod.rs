@@ -43,7 +43,7 @@ pub use decisions::{
 };
 pub use draw::presets::check_names;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
-pub use draw::{drawing, fold_pastes, live_head, woke_ref};
+pub use draw::{drawing, fold_pastes, live_head, woke_ref, yours};
 pub use markdown::{answer_lines, link_target, markdown_lines};
 pub use needs::{
     NEEDS_ALL, NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref, without_chrome,

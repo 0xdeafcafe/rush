@@ -408,7 +408,7 @@ fn renders_the_fixture() {
     let out = text(&Renderer::new().render(&s, &o));
     for want in [
         "▍ the ux right now is totally broken when i attach",
-        "4 steps   10s   $0.52",
+        "4 steps · 10s · $0.52",
         "Looking at how attach restores the terminal modes.",
         "▍ Fixed the alt screen.",
         "▍ add modern key stuff to input too",
@@ -1513,7 +1513,11 @@ fn a_lint_step_says_what_happened() {
                 .lines()
                 .find(|l| l.contains(row))
                 .unwrap_or_else(|| panic!("{w}: no {row}:\n{out}"));
-            assert!(l.trim_start().starts_with("│ "), "{w}: {l}");
+            // In the body's gutter, the step's red edge left of it.
+            assert!(
+                l.starts_with('▍') && l.contains(&format!("│ {row}")),
+                "{w}: {l}"
+            );
         }
         assert!(out.contains("cognitive-complexity"), "{w}:\n{out}");
         assert!(
@@ -1734,7 +1738,7 @@ fn a_search_steps_code_is_coloured() {
         assert_ne!(span("then").fg, out_c, "{cmd}: then is a call");
         assert_eq!(
             span("1000:").fg,
-            Color::Rgb(94, 89, 82),
+            Color::Rgb(108, 102, 94),
             "{cmd}: number faint"
         );
         let hit: Style = row
