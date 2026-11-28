@@ -259,7 +259,7 @@ fn header_draws_no_five_hour_meter() {
     let mut low = q(&ls, "alsome").clone();
     low.windows[0].percent = 85.0;
     let note = switch_note(&low, &[], NOW);
-    assert_eq!(note, "low: 85% of 7d used");
+    assert_eq!(note, "7d limit 85%");
 }
 
 fn fleet(ls: &[LoginView]) -> Vec<rush_fleet::LoginView> {

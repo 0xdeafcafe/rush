@@ -81,7 +81,8 @@ pub fn meter_row(rows: &[MeterRow], w: usize) -> Line {
 
 /// The low note's words: nothing while q has room or its reading is old;
 /// else how full it is, and where there's most room, when anywhere has
-/// room (switchNote).
+/// room (switchNote). "7d limit 88%", not Go's "low: 88% of 7d used":
+/// "low" beside the model's effort read as an effort level (Rust-only).
 pub fn switch_note(q: &Quota, others: &[MeterRow], now: Ms) -> String {
     let Some(w) = q.tightest("") else {
         return String::new();
@@ -89,7 +90,7 @@ pub fn switch_note(q: &Quota, others: &[MeterRow], now: Ms) -> String {
     if w.percent < LOW_AT || now - q.fetched_at > FRESH {
         return String::new();
     }
-    let mut s = format!("low: {} of {} used", pct(w.percent), w.label);
+    let mut s = format!("{} limit {}", w.label, pct(w.percent));
     let best = others
         .iter()
         .filter(|r| {

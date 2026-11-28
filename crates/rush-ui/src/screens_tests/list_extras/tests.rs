@@ -774,12 +774,9 @@ fn switch_note() {
     ];
     assert_eq!(
         meters::switch_note(&cur, &others, NOW),
-        "low: 92% of 5h used · OpenAI (Codex) · alex has 70% left"
+        "5h limit 92% · OpenAI (Codex) · alex has 70% left"
     );
-    assert_eq!(
-        meters::switch_note(&cur, &others[..1], NOW),
-        "low: 92% of 5h used"
-    );
+    assert_eq!(meters::switch_note(&cur, &others[..1], NOW), "5h limit 92%");
     assert_eq!(
         meters::switch_note(&used_row("", "", 60.0, NOW).q, &others, NOW),
         ""
