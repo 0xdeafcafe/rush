@@ -40,10 +40,15 @@ const READ_TAIL: u64 = 8 << 20;
 const EVENTS_TAIL: u64 = 256 << 10;
 
 /// The agents the view's list has now: the loader's quick reading.
+///
+/// Without GitHub: its pull requests are asked in the background and kept
+/// for the process, so a command that prints and exits would only start a
+/// gh pr list per repository that nobody reads, every time it runs. Rows
+/// keep the pull requests their agents linked.
 pub fn load_agents(reg: &Registry) -> Vec<Agent> {
-    rush_fleet::Loader::from_state(reg.clone())
-        .load_quick(now())
-        .agents
+    let mut l = rush_fleet::Loader::from_state(reg.clone());
+    l.set_gh(None);
+    l.load_quick(now()).agents
 }
 
 /// The id a session goes by here: a rush session's short id, else its
